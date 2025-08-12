@@ -7,8 +7,8 @@
  * - RegenerateTaskOutput - The return type for the regenerateTask function.
  */
 
-import { ai } from '@/ai/genkit';
-import { z } from 'genkit';
+import { generateContent } from '@/ai/claude';
+import { z } from 'zod';
 import { Persona } from '@/lib/types';
 
 const RegenerateTaskInputSchema = z.object({
@@ -23,42 +23,38 @@ const RegenerateTaskOutputSchema = z.object({
 });
 export type RegenerateTaskOutput = z.infer<typeof RegenerateTaskOutputSchema>;
 
-export async function regenerateTask(input: RegenerateTaskInput): Promise<RegenerateTaskOutput> {
-  return regenerateTaskFlow(input);
-}
-
-const prompt = ai.definePrompt({
-  name: 'regenerateTaskPrompt',
-  input: { schema: RegenerateTaskInputSchema },
-  output: { schema: RegenerateTaskOutputSchema },
-  prompt: `You are an expert at refining and clarifying goals. Your job is to rewrite a scope to be more effective, based on the original text and user feedback.
-{{#if persona}}
-You should adopt the persona of an expert **{{persona}}** to guide your response.
-{{/if}}
-
-Original Scope: "{{originalTask}}"
-
-{{#if userInput}}
-User Feedback:
----
-{{{userInput}}}
----
-{{/if}}
+async function regenerateTaskFlow(input: RegenerateTaskInput): Promise<RegenerateTaskOutput> {
+  const validated = RegenerateTaskInputSchema.parse(input);
+  let systemPrompt = `You are an expert at refining and clarifying goals. Your job is to rewrite a scope to be more effective, based on the original text and user feedback.
 
 Rewrite the scope based on the original and the feedback. If feedback is provided, prioritize it. The new scope should be a single, concise sentence. Do not output anything else.
 
-Generate the new scope text.
-`,
-});
+Return only the new scope text, nothing else.`;
 
-const regenerateTaskFlow = ai.defineFlow(
-  {
-    name: 'regenerateTaskFlow',
-    inputSchema: RegenerateTaskInputSchema,
-    outputSchema: RegenerateTaskOutputSchema,
-  },
-  async (input) => {
-    const { output } = await prompt(input);
-    return output!;
+  if (validated.persona) {
+    systemPrompt += `\n\nYou should adopt the persona of an expert **${validated.persona}** to guide your response.`;
   }
-);
+
+  let userPrompt = `Original Scope: "${validated.originalTask}"`;
+
+  if (validated.userInput) {
+    userPrompt += `\n\nUser Feedback:
+---
+${validated.userInput}
+---`;
+  }
+
+  userPrompt += `\n\nGenerate the new scope text.`;
+
+  const response = await generateContent(userPrompt, systemPrompt, 1000);
+  
+  const result: RegenerateTaskOutput = {
+    newTask: response.trim()
+  };
+  
+  return RegenerateTaskOutputSchema.parse(result);
+}
+
+export async function regenerateTask(input: RegenerateTaskInput): Promise<RegenerateTaskOutput> {
+  return regenerateTaskFlow(input);
+}

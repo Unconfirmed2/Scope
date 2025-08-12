@@ -21,10 +21,10 @@ The central idea is to transform break down any topic, goal, or problem into its
 - **Language:** [TypeScript](https://www.typescriptlang.org/)
 - **UI Components:** [shadcn/ui](https://ui.shadcn.com/) - A collection of reusable components built on Radix UI and Tailwind CSS. Components are not installed as a library but are integrated directly into the source code under `src/components/ui`.
 - **Styling:** [Tailwind CSS](https://tailwindcss.com/)
-- **AI Integration:** [Genkit](https://firebase.google.com/docs/genkit) (specifically `@genkit-ai/googleai` for Gemini models). All AI logic is encapsulated in server-side "flows."
+- **AI Integration:** AI logic is encapsulated in server-side "flows."
 - **State Management:** React Context and custom hooks (`useProjects`, `useAuth`). There is no external state management library like Redux or Zustand.
-- **Data Persistence:** Browser `localStorage`. All user data (projects, tasks, etc.) is stored locally. The storage key is dynamically generated based on the user's UID from Neon Auth, providing per-user data isolation. For anonymous users, a default key is used.
-- **Authentication:** neon and google oath
+- **Data Persistence:** Browser `localStorage`. All user data (projects, tasks, etc.) is stored locally. The storage key is per-user (mock auth by default). For anonymous users, a default key is used.
+- **Authentication:** Local stub by default. You can integrate any provider later (Auth0, Cognito, custom OAuth).
 
 ---
 
@@ -48,7 +48,7 @@ The central idea is to transform break down any topic, goal, or problem into its
 │   │
 │   ├── hooks/              # Custom React hooks
 │   │   ├── use-projects.ts # Core logic for managing projects/tasks (CRUD, state)
-│   │   ├── use-auth.tsx    # Firebase Authentication logic
+│   │   ├── use-auth.tsx    # Authentication logic (local stub by default)
 │   │   └── use-toast.ts    # Notification system
 │   │
 │   ├── ai/                 # Genkit AI Flows
@@ -60,7 +60,7 @@ The central idea is to transform break down any topic, goal, or problem into its
 │   └── lib/                # Shared utilities, types, and client-side libraries
 │       ├── types.ts        # Core TypeScript type definitions (Project, Task, etc.)
 │       ├── utils.ts        # Helper functions (sorting, counting, etc.)
-│       └── firebase.ts     # Firebase client initialization
+│       └── (backend integrations live here)
 │
 ├── package.json            # Project dependencies and scripts
 └── ... (config files)
@@ -115,9 +115,8 @@ The `useProjects` hook is the "brain" of the client-side application.
 
 ### c. Authentication (`useAuth` hook)
 
--   The `useAuth` hook abstracts all Firebase Auth logic.
+-   The `useAuth` hook abstracts auth logic and currently returns a mock user object to simplify local development.
 -   It provides the current `user` object and a `loading` state.
--   Crucially, it contains a `BYPASS_AUTH_FOR_TESTING` flag. When `true`, it returns a mock user object, allowing developers to work on the app without needing to configure Firebase credentials locally.
 -   It exposes methods like `signIn`, `signUp`, `logOut`, and profile update functions.
 -   The user's UID from this hook is used by `useProjects` to determine the correct `localStorage` key.
 
@@ -127,7 +126,7 @@ The `useProjects` hook is the "brain" of the client-side application.
 2.  **Set up shadcn/ui**: Initialize shadcn/ui and add all the necessary components used in the project (Button, Dialog, Dropdown, etc.). This will create the `src/components/ui` directory.
 3.  **Define Core Types**: Create `src/lib/types.ts` and define the `Project`, `Task`, `Comment`, and `Persona` types. This is a critical first step.
 4.  **Build the `useProjects` Hook**: This is the most complex piece of client-side logic. Implement the `loadInitialData` and `save` effects first, then add the various CRUD methods one by one.
-5.  **Build the `useAuth` Hook**: Set up a Firebase project and copy the config into `src/lib/firebase.ts`. Implement the `useAuth` hook to manage user state.
+5.  **Build the `useAuth` Hook**: Implement the `useAuth` hook to manage user state and wire it to your chosen identity provider later.
 6.  **Implement AI Flows**:
     -   Install Genkit (`@genkit-ai/googleai`, etc.).
     -   Create the `src/ai/genkit.ts` configuration file.

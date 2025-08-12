@@ -39,6 +39,34 @@ const nextConfig: NextConfig = {
       ],
     },
   },
+  // Prevent bundling Node-only/optional deps; let Node resolve at runtime
+  serverExternalPackages: [
+    '@anthropic-ai/sdk',
+    '@opentelemetry/api',
+    '@opentelemetry/sdk-node',
+    '@opentelemetry/resources',
+    '@opentelemetry/semantic-conventions',
+  ],
+  // Fine-tune Webpack to avoid resolving optional packages that cause build errors
+  webpack: (config, { isServer }) => {
+    config.resolve = config.resolve || {} as any;
+    (config.resolve.alias as Record<string, any>) = {
+      ...(config.resolve.alias || {}),
+      // Optional/peer deps that shouldn't be bundled in Next
+      '@opentelemetry/exporter-jaeger': false,
+    };
+
+    // Some packages reference Node built-ins; ensure they're not polyfilled on the client
+    if (!isServer) {
+      (config.resolve.fallback as Record<string, any>) = {
+        ...(config.resolve.fallback || {}),
+        fs: false,
+        path: false,
+        os: false,
+      };
+    }
+    return config;
+  },
   // Add headers to handle CORS and MIME types in Codespaces
   ...(codespaceName && process.env.NODE_ENV === 'development' ? {
     async headers() {

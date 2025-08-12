@@ -4,8 +4,8 @@
  * and synthesis exercise, structuring them into a hierarchical JSON plan.
  */
 
-import { ai } from '@/ai/genkit';
-import { z } from 'genkit';
+import { generateContent } from '@/ai/claude';
+import { z } from 'zod';
 import { Persona } from '@/lib/types';
 
 
@@ -43,14 +43,8 @@ const GenerateTaskStepsOutputSchema = z.object({
 export type GenerateTaskStepsOutput = z.infer<typeof GenerateTaskStepsOutputSchema>;
 
 
-const generateTaskStepsFlow = ai.defineFlow(
-  {
-    name: 'generateTaskStepsFlow',
-    inputSchema: GenerateTaskStepsInputSchema,
-    outputSchema: GenerateTaskStepsOutputSchema,
-  },
-  async (input) => {
-    
+async function generateTaskStepsFlow(input: GenerateTaskStepsInput): Promise<GenerateTaskStepsOutput> {
+    const validated = GenerateTaskStepsInputSchema.parse(input);
     let systemPrompt = `You are an expert consultant and strategist. Your primary function is to perform a comprehensive "breakdown and synthesis" for any user request. Treat every query as a request for a detailed, structured plan in JSON format.
 
 Your response must be structured in three parts:
@@ -62,11 +56,12 @@ Your response must be structured in three parts:
     -   Items can have nested 'children' for further detail, following the same structure.
 
 3.  **Synthesize**: After the breakdown, provide a concise, high-level 'synthesis'. This should be a summary of the overall strategy, key considerations, and the logical flow of the plan you've created. It should not just repeat the breakdown but provide a coherent narrative.
-`;
 
-    if (input.persona) {
-        systemPrompt += `\n\nYou are an expert **${input.persona}**.`;
-        switch (input.persona) {
+IMPORTANT: Respond ONLY with valid JSON matching the exact schema structure. Do not include any markdown formatting, explanations, or text outside the JSON.`;
+
+    if (validated.persona) {
+        systemPrompt += `\n\nYou are an expert **${validated.persona}**.`;
+        switch (validated.persona) {
             case Persona.Planner:
                 systemPrompt += " Your function is to build structured, detailed, and actionable plans. If the user's request is for a recipe, meal plan, menu, or anything food-related, you MUST provide the complete recipe. This includes a list of ingredients with precise quantities, detailed step-by-step instructions for preparation, and any relevant supplementary information like nutritional facts or allergy warnings. Do not omit this for any food-related request.";
                 break;
@@ -97,42 +92,51 @@ Your response must be structured in three parts:
         }
     }
 
-    const prompt = ai.definePrompt({
-        name: 'generateTaskStepsPrompt',
-        input: { schema: GenerateTaskStepsInputSchema },
-        output: { schema: GenerateTaskStepsOutputSchema },
-        system: systemPrompt,
-        prompt: `Here is the user's request:
+    let userPrompt = `Here is the user's request:
 ---
-Goal: "{{goal}}"
-{{#if userInput}}
-Additional Instructions: {{{userInput}}}
-{{/if}}
-{{#if photoDataUri}}
-Image context is attached.
-{{media url=photoDataUri}}
-{{/if}}
----
+Goal: "${validated.goal}"`;
 
-{{#if projectName}}
-This request is part of a larger folder named "{{projectName}}". Keep this context in mind.
-{{/if}}
+    if (validated.userInput) {
+        userPrompt += `\nAdditional Instructions: ${validated.userInput}`;
+    }
 
-{{#if existingTasks}}
-For context, here are some other scopes already in this folder:
-{{#each existingTasks}}
-- {{this}}
-{{/each}}
-{{/if}}
+    if (validated.photoDataUri) {
+        userPrompt += `\nImage context is attached.`;
+        // Note: Image handling would need to be implemented separately for Claude API
+    }
 
-Now, generate the full rephrasing, breakdown, and synthesis in the required JSON format.
-`,
-    });
+    userPrompt += '\n---';
 
-    const { output } = await prompt(input);
-    return output!;
-  }
-);
+    if (validated.projectName) {
+        userPrompt += `\n\nThis request is part of a larger folder named "${validated.projectName}". Keep this context in mind.`;
+    }
+
+    if (validated.existingTasks && validated.existingTasks.length > 0) {
+        userPrompt += `\n\nFor context, here are some other scopes already in this folder:`;
+        validated.existingTasks.forEach(task => {
+            userPrompt += `\n- ${task}`;
+        });
+    }
+
+    userPrompt += `\n\nNow, generate the full rephrasing, breakdown, and synthesis in the required JSON format with the following structure:
+{
+  "rephrased_goal": "string",
+  "breakdown_items": [...],
+  "synthesis": "string"
+}`;
+
+    const response = await generateContent(userPrompt, systemPrompt, 4000);
+    
+    try {
+        const parsedResponse = JSON.parse(response);
+        const validatedOutput = GenerateTaskStepsOutputSchema.parse(parsedResponse);
+        return validatedOutput;
+    } catch (error) {
+        console.error('Failed to parse Claude response:', error);
+        console.error('Raw response:', response);
+        throw new Error('Failed to parse AI response into valid format');
+    }
+}
 
 export async function generateTaskSteps(input: GenerateTaskStepsInput): Promise<GenerateTaskStepsOutput> {
   return generateTaskStepsFlow(input);

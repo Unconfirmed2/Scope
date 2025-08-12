@@ -10,13 +10,7 @@
   ];
   # Sets environment variables in the workspace
   env = {};
-  # This adds a file watcher to startup the firebase emulators. The emulators will only start if
-  # a firebase.json file is written into the user's directory
-  services.firebase.emulators = {
-    detect = true;
-    projectId = "demo-app";
-    services = ["auth" "firestore"];
-  };
+  # Firebase emulators previously configured here; removed as project is backend-agnostic now.
   idx = {
     # Search for the extensions you want on https://open-vsx.org/ and use "publisher.id"
     extensions = [

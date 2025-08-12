@@ -9,7 +9,6 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, User, Users, KeyRound, Bell, Link as LinkIcon, Trash2, LogOut, Camera } from 'lucide-react';
-import { FirebaseError } from 'firebase/app';
 import { cn } from '@/lib/utils';
 import { Separator } from './ui/separator';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
@@ -71,11 +70,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             setNewPassword('');
             setConfirmPassword('');
         } catch (error) {
-            if (error instanceof FirebaseError && error.code === 'auth/requires-recent-login') {
-                toast({ variant: 'destructive', title: 'Action Required', description: 'This action is sensitive and requires recent authentication. Please log out and log back in before changing your password.' });
-            } else {
-                toast({ variant: 'destructive', title: 'Error', description: 'Could not update password.' });
-            }
+            toast({ variant: 'destructive', title: 'Error', description: 'Could not update password.' });
         } finally {
             setLoading(null);
         }

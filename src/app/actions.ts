@@ -1,13 +1,12 @@
 
 'use server';
 
-import { generateProjectDescription } from '@/ai/flows/generate-project-description';
 import { generateProjectSummary, type GenerateProjectSummaryInput } from '@/ai/flows/generate-project-summary';
 import { executeTask, type ExecuteTaskInput } from '@/ai/flows/execute-task';
 import { regenerateTask, type RegenerateTaskInput } from '@/ai/flows/regenerate-task';
 import { generateTaskSteps, type GenerateTaskStepsInput, type GenerateTaskStepsOutput } from '@/ai/flows/generate-task-steps';
 import { z } from 'zod';
-import { Persona, type Task, type Project } from '@/lib/types';
+import { Persona, type Task, type Project, type CommentStatus, type TaskStatus, type Comment, type ExecutionResult } from '@/lib/types';
 
 
 const GenerateTasksInputSchema = z.object({
@@ -43,22 +42,30 @@ export async function handleGenerateTasks(input: GenerateTasksInput): Promise<{ 
 }
 
 const transformItemForAI = (item: Project | Task) => {
-    const transformComments = (comments: any[]): any[] => {
-        return (comments || []).map(c => ({
+    type AiComment = { text: string; status: CommentStatus; replies: AiComment[] };
+    type AiExecutionResult = { resultText: string };
+    type AiTask = {
+        text: string;
+        status: TaskStatus;
+        subtasks: AiTask[];
+        comments: AiComment[];
+        executionResults: AiExecutionResult[];
+    };
+
+    const transformComments = (comments: Comment[] = []): AiComment[] => {
+        return comments.map((c) => ({
             text: c.text,
             status: c.status,
-            replies: c.replies ? transformComments(c.replies) : []
+            replies: c.replies ? transformComments(c.replies) : [],
         }));
     };
 
-    const transformExecutionResults = (results: any[]) => {
-        return (results || []).map(r => ({
-            resultText: r.resultText
-        }));
-    }
+    const transformExecutionResults = (results: ExecutionResult[] = []): AiExecutionResult[] => {
+        return results.map((r) => ({ resultText: r.resultText }));
+    };
 
-    const transformTasks = (tasks: any[]): any[] => {
-        return (tasks || []).map(t => ({
+    const transformTasks = (tasks: Task[] = []): AiTask[] => {
+        return tasks.map((t) => ({
             text: t.text,
             status: t.status,
             subtasks: t.subtasks ? transformTasks(t.subtasks) : [],

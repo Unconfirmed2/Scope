@@ -2,31 +2,24 @@
 'use client';
 
 import { useState, useEffect, useContext, createContext, type ReactNode } from 'react';
-import { 
-    getAuth, 
-    onAuthStateChanged, 
-    createUserWithEmailAndPassword, 
-    signInWithEmailAndPassword, 
-    signOut,
-    GoogleAuthProvider,
-    signInWithPopup,
-    sendPasswordResetEmail,
-    updateProfile,
-    updateEmail,
-    updatePassword,
-    type User 
-} from 'firebase/auth';
-import { auth } from '@/lib/firebase';
 import { useToast } from './use-toast';
 
+// Minimal local user type (replaces Firebase User)
+export type AppUser = {
+    uid: string;
+    email: string | null;
+    displayName: string | null;
+    photoURL?: string | null;
+};
+
 type AuthContextType = {
-    user: User | null;
+    user: AppUser | null;
     loading: boolean;
-    signUp: (email: string, pass: string) => Promise<any>;
-    signIn: (email: string, pass: string) => Promise<any>;
-    signInWithGoogle: () => Promise<any>;
-    sendPasswordReset: (email: string) => Promise<any>;
-    logOut: () => Promise<any>;
+    signUp: (email: string, pass: string) => Promise<void>;
+    signIn: (email: string, pass: string) => Promise<void>;
+    signInWithGoogle: () => Promise<void>;
+    sendPasswordReset: (email: string) => Promise<void>;
+    logOut: () => Promise<void>;
     updateUserProfile: (displayName: string, photoURL?: string) => Promise<void>;
     updateUserEmail: (email: string) => Promise<void>;
     updateUserPassword: (password: string) => Promise<void>;
@@ -34,112 +27,72 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// --- Simple flag to bypass auth for testing ---
-// Set this to `false` to re-enable real Firebase authentication
-const BYPASS_AUTH_FOR_TESTING = true;
-// ---------------------------------------------
-
-
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-    const [user, setUser] = useState<User | null>(null);
+    const [user, setUser] = useState<AppUser | null>(null);
     const [loading, setLoading] = useState(true);
     const { toast } = useToast();
 
     useEffect(() => {
-        if (BYPASS_AUTH_FOR_TESTING) {
-            const mockUser = {
-                uid: 'test-user-123',
-                email: 'test@example.com',
-                displayName: 'Test User',
-                photoURL: 'https://placehold.co/100x100.png',
-                refreshToken: '',
-                phoneNumber: null,
-                emailVerified: true,
-                isAnonymous: false,
-                metadata: {},
-                providerData: [],
-                providerId: 'password',
-                tenantId: null,
-                delete: async () => {},
-                getIdToken: async () => 'mock-token',
-                getIdTokenResult: async () => ({ token: 'mock-token', claims: {}, authTime: '', expirationTime: '', issuedAtTime: '', signInProvider: null, signInSecondFactor: null }),
-                reload: async () => {},
-                toJSON: () => ({}),
-            };
-            setUser(mockUser);
-            setLoading(false);
-            return;
-        }
-
-        const unsubscribe = onAuthStateChanged(auth, (user) => {
-            setUser(user);
-            setLoading(false);
-        });
-
-        return () => unsubscribe();
+        // Immediately set a mock user; replace with real backend integration later
+        const mockUser: AppUser = {
+            uid: 'test-user-123',
+            email: 'test@example.com',
+            displayName: 'Test User',
+            photoURL: 'https://placehold.co/100x100.png',
+        };
+        setUser(mockUser);
+        setLoading(false);
     }, []);
 
-    const signUp = (email: string, pass: string) => {
-        if (BYPASS_AUTH_FOR_TESTING) return Promise.resolve();
-        return createUserWithEmailAndPassword(auth, email, pass);
+    const signUp = () => {
+        // Stub: no-op success
+        return Promise.resolve();
     };
 
-    const signIn = (email: string, pass: string) => {
-        if (BYPASS_AUTH_FOR_TESTING) return Promise.resolve();
-        return signInWithEmailAndPassword(auth, email, pass);
+    const signIn = (email: string) => {
+        // Stub: set mock user with provided email
+        setUser((prev) => ({
+            uid: prev?.uid ?? 'test-user-123',
+            email,
+            displayName: prev?.displayName ?? 'Test User',
+            photoURL: prev?.photoURL ?? 'https://placehold.co/100x100.png',
+        }));
+        return Promise.resolve();
     };
 
     const signInWithGoogle = () => {
-        if (BYPASS_AUTH_FOR_TESTING) return Promise.resolve();
-        const provider = new GoogleAuthProvider();
-        return signInWithPopup(auth, provider);
+        // Stub: simulate Google sign-in by setting a user
+        setUser({
+            uid: 'test-google-user-123',
+            email: 'google.user@example.com',
+            displayName: 'Google User',
+            photoURL: 'https://placehold.co/100x100.png',
+        });
+        return Promise.resolve();
     }
 
-    const sendPasswordReset = (email: string) => {
-        if (BYPASS_AUTH_FOR_TESTING) return Promise.resolve();
-        return sendPasswordResetEmail(auth, email);
+    const sendPasswordReset = () => {
+        // Stub: no-op success
+        return Promise.resolve();
     }
     
     const logOut = () => {
-        if (BYPASS_AUTH_FOR_TESTING) {
-            toast({ title: "Auth is bypassed.", description: "Logout does nothing in test mode." });
-            return Promise.resolve();
-        }
-        return signOut(auth).then(() => {
-            toast({ title: "You've been signed out." });
-        });
+        setUser(null);
+        toast({ title: "You've been signed out." });
+        return Promise.resolve();
     };
     
     const updateUserProfile = async (displayName: string, photoURL?: string) => {
-        if (BYPASS_AUTH_FOR_TESTING) {
-            setUser(prev => prev ? { ...prev, displayName, photoURL: photoURL || prev.photoURL } as User : null);
-            return Promise.resolve();
-        }
-        if (auth.currentUser) {
-            await updateProfile(auth.currentUser, { displayName, photoURL });
-            setUser({ ...auth.currentUser }); // Force state update
-        }
+        setUser(prev => prev ? { ...prev, displayName, photoURL: photoURL ?? prev.photoURL } : null);
     };
     
     const updateUserEmail = async (email: string) => {
-        if (BYPASS_AUTH_FOR_TESTING) {
-            setUser(prev => prev ? { ...prev, email } as User : null);
-            return Promise.resolve();
-        }
-        if (auth.currentUser) {
-            await updateEmail(auth.currentUser, email);
-             setUser({ ...auth.currentUser });
-        }
+        setUser(prev => prev ? { ...prev, email } : null);
     }
     
-    const updateUserPassword = async (password: string) => {
-        if (BYPASS_AUTH_FOR_TESTING) {
-             toast({ title: "Password updated (mock)" });
-            return Promise.resolve();
-        }
-        if (auth.currentUser) {
-            await updatePassword(auth.currentUser, password);
-        }
+    const updateUserPassword = async () => {
+        // Stub: just notify
+        toast({ title: "Password updated (mock)" });
     }
 
 

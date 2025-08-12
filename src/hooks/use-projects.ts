@@ -633,7 +633,7 @@ export function useProjects() {
         
         projects.forEach(p => buildMaps(p.tasks, null));
 
-        let idsToUpdate: Set<string | null> = new Set();
+    const idsToUpdate: Set<string | null> = new Set();
         if (childId) {
             let currentId: string | null = childId;
             while(currentId) {

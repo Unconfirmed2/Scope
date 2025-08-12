@@ -7,8 +7,8 @@
  * - GenerateProjectDescriptionOutput - The return type for the generateProjectDescription function.
  */
 
-import { ai } from '@/ai/genkit';
-import { z } from 'genkit';
+import { generateContent } from '@/ai/claude';
+import { z } from 'zod';
 import type { Task } from '@/lib/types';
 
 
@@ -26,39 +26,32 @@ const GenerateProjectDescriptionOutputSchema = z.object({
 export type GenerateProjectDescriptionOutput = z.infer<typeof GenerateProjectDescriptionOutputSchema>;
 
 
+async function generateProjectDescriptionFlow(input: GenerateProjectDescriptionInput): Promise<GenerateProjectDescriptionOutput> {
+  const validated = GenerateProjectDescriptionInputSchema.parse(input);
+  const systemPrompt = `You are an expert project manager. Your task is to write a concise, one-paragraph description for a folder based on its name and a list of its top-level scopes. The description should summarize the folder's main goal and scope.
+
+Return only the folder description, nothing else.`;
+
+  let userPrompt = `Folder Name: "${validated.projectName}"\n\nScopes:`;
+  
+  validated.tasks.forEach(task => {
+    userPrompt += `\n- ${task}`;
+  });
+
+  userPrompt += `\n\nGenerate the folder description.`;
+
+  const response = await generateContent(userPrompt, systemPrompt, 500);
+  
+  const result: GenerateProjectDescriptionOutput = {
+    description: response.trim()
+  };
+  
+  return GenerateProjectDescriptionOutputSchema.parse(result);
+}
+
 // The function the client calls, which can accept the full Task type.
 export async function generateProjectDescription(projectName: string, tasks: Task[]): Promise<GenerateProjectDescriptionOutput> {
   // We map the full scopes to just their text to match the Zod schema for the flow.
   const taskTexts = tasks.map(t => t.text);
   return generateProjectDescriptionFlow({ projectName, tasks: taskTexts });
 }
-
-
-const prompt = ai.definePrompt({
-  name: 'generateProjectDescriptionPrompt',
-  input: { schema: GenerateProjectDescriptionInputSchema },
-  output: { schema: GenerateProjectDescriptionOutputSchema },
-  prompt: `You are an expert project manager. Your task is to write a concise, one-paragraph description for a folder based on its name and a list of its top-level scopes. The description should summarize the folder's main goal and scope.
-
-Folder Name: "{{projectName}}"
-
-Scopes:
-{{#each tasks}}
-- {{this}}
-{{/each}}
-
-Generate the folder description.
-`,
-});
-
-const generateProjectDescriptionFlow = ai.defineFlow(
-  {
-    name: 'generateProjectDescriptionFlow',
-    inputSchema: GenerateProjectDescriptionInputSchema,
-    outputSchema: GenerateProjectDescriptionOutputSchema,
-  },
-  async (input) => {
-    const { output } = await prompt(input);
-    return output!;
-  }
-);

@@ -238,8 +238,8 @@ export default function Home() {
     e?.preventDefault();
     if (!goal.trim() || !isLoaded || !activeProject) return;
 
-    let targetProjectId = activeProjectId || 'unassigned';
-    let targetProject = projects.find(p => p.id === targetProjectId);
+    const targetProjectId = activeProjectId || 'unassigned';
+    const targetProject = projects.find(p => p.id === targetProjectId);
 
     if (!targetProject) {
         toast({ variant: 'destructive', title: 'Error', description: 'Could not find a folder to add the scope to.' });
@@ -279,8 +279,8 @@ export default function Home() {
   const handleAcceptConfirmation = async () => {
     if (!aiConfirmationResponse || !isLoaded) return;
   
-    let targetProjectId = activeProjectId || 'unassigned';
-    let targetProject = projects.find(p => p.id === targetProjectId);
+    const targetProjectId = activeProjectId || 'unassigned';
+    const targetProject = projects.find(p => p.id === targetProjectId);
 
     if (!targetProject) {
         toast({ variant: 'destructive', title: 'Error', description: 'Could not find a folder to add the scope to.' });
@@ -363,8 +363,8 @@ export default function Home() {
   const handleCreateManualTemplate = () => {
     if (!isLoaded) return;
 
-    let targetProjectId = activeProjectId || 'unassigned';
-    let targetProject = projects.find(p => p.id === targetProjectId);
+    const targetProjectId = activeProjectId || 'unassigned';
+    const targetProject = projects.find(p => p.id === targetProjectId);
 
     if (!targetProject) {
         toast({ variant: 'destructive', title: 'Error', description: 'Could not find a folder to add the template to.' });

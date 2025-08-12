@@ -11,7 +11,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
 import { Separator } from './ui/separator';
-import { FirebaseError } from 'firebase/app';
 
 const GoogleIcon = () => (
     <svg className="mr-2 h-4 w-4" viewBox="0 0 48 48">
@@ -38,32 +37,9 @@ export function AuthDialog({ open, onOpenChange }: AuthDialogProps) {
     const { toast } = useToast();
 
     const handleAuthError = (error: any) => {
-        let title = 'Authentication Failed';
+        const title = 'Authentication Failed';
         let description = "An unknown error occurred.";
-
-        if (error instanceof FirebaseError) {
-            switch (error.code) {
-                case 'auth/email-already-in-use':
-                    title = 'Email In Use';
-                    description = 'This email is already associated with an account. Please try logging in.';
-                    break;
-                case 'auth/user-not-found':
-                    title = 'User Not Found';
-                    description = 'No account found with this email. Would you like to sign up?';
-                    break;
-                case 'auth/wrong-password':
-                    title = 'Incorrect Password';
-                    description = 'The password you entered is incorrect. Please try again.';
-                    break;
-                 case 'auth/account-exists-with-different-credential':
-                    title = 'Account Conflict';
-                    description = 'An account already exists with this email address, but it was created using a different sign-in method (e.g., Google). Please sign in using the original method.';
-                    break;
-                default:
-                    description = error.message;
-                    break;
-            }
-        }
+        if (error && typeof error === 'object') description = (error as any).message || description;
         
         toast({ variant: 'destructive', title, description });
     }

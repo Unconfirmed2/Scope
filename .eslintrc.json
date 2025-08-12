@@ -1,0 +1,23 @@
+{
+  "extends": [
+    "next/core-web-vitals",
+    "next/typescript"
+  ],
+  "overrides": [
+    {
+      "files": ["src/ai/flows/**/*.{ts,tsx}", "src/lib/**/*.{ts,tsx}", "src/app/actions.ts"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "error",
+        "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
+      }
+    },
+    {
+      "files": ["src/components/**/*.{ts,tsx}", "src/app/page.tsx", "src/hooks/**/*.{ts,tsx}"],
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "off",
+        "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
+        "react/no-unescaped-entities": "off"
+      }
+    }
+  ]
+}
