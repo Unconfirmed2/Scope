@@ -39,7 +39,7 @@ export function SummaryView({ project, activeTask, onGenerateSummary }: SummaryV
     };
 
     const hasSummaries = summaries.length > 0;
-    const summaryTitle = summaryItem.name || (summaryItem as Task).text;
+    const summaryTitle = 'name' in summaryItem ? summaryItem.name : summaryItem.text;
 
     return (
         <div className="flex gap-6 p-4 bg-card rounded-lg border max-w-7xl mx-auto">

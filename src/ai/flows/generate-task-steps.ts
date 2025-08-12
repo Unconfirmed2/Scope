@@ -9,7 +9,14 @@ import { z } from 'genkit';
 import { Persona } from '@/lib/types';
 
 
-const BreakdownItemSchema: z.ZodType<any> = z.lazy(() =>
+// Define the breakdown item interface
+interface BreakdownItem {
+  title: string;
+  content?: string[];
+  children?: BreakdownItem[];
+}
+
+const BreakdownItemSchema: z.ZodType<BreakdownItem> = z.lazy(() =>
   z.object({
     title: z.string().describe('The title of this specific item (e.g., "I. Preparation", "A. Ingredients")'),
     content: z.array(z.string()).optional().describe('A paragraph or bullet points providing the core information for this item.'),

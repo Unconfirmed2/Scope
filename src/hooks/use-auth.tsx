@@ -47,11 +47,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     useEffect(() => {
         if (BYPASS_AUTH_FOR_TESTING) {
-            const mockUser: User = {
+            const mockUser = {
                 uid: 'test-user-123',
                 email: 'test@example.com',
                 displayName: 'Test User',
                 photoURL: 'https://placehold.co/100x100.png',
+                refreshToken: '',
+                phoneNumber: null,
                 emailVerified: true,
                 isAnonymous: false,
                 metadata: {},

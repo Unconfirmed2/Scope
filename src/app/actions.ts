@@ -43,7 +43,7 @@ export async function handleGenerateTasks(input: GenerateTasksInput): Promise<{ 
 }
 
 const transformItemForAI = (item: Project | Task) => {
-    const transformComments = (comments: any[]) => {
+    const transformComments = (comments: any[]): any[] => {
         return (comments || []).map(c => ({
             text: c.text,
             status: c.status,

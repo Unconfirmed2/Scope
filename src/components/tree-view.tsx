@@ -12,8 +12,8 @@ import Linkify from 'linkify-react';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Checkbox } from './ui/checkbox';
-import { countDirectSubtasks, sortTasks, findTaskPath } from '@/lib/utils';
-import { personas } from '@/app/page';
+import { countDirectSubtasks, sortTasks, findTaskPath, findTaskRecursive } from '@/lib/utils';
+import { personas } from '@/lib/personas';
 import {
     Dialog,
     DialogContent,
@@ -298,6 +298,20 @@ const TaskNode = ({
   };
 
   const handleCopyToClipboard = () => {
+    const formatTaskToString = (taskToFormat: Task, level: number): string => {
+        const indent = '  '.repeat(level);
+        const statusIcon = taskToFormat.status === 'done' ? '[x]' : '[ ]';
+        let output = `${indent}- ${statusIcon} ${taskToFormat.text}\n`;
+        
+        if (taskToFormat.description) {
+            const descriptionIndent = '  '.repeat(level + 1);
+            output += `${descriptionIndent}${taskToFormat.description.replace(/\n/g, `\n${descriptionIndent}`)}\n`;
+        }
+        if (taskToFormat.subtasks && taskToFormat.subtasks.length > 0) {
+            output += taskToFormat.subtasks.map(subtask => formatTaskToString(subtask, level + 1)).join('');
+        }
+        return output;
+    };
     const textToCopy = formatTaskToString(task, 0);
     navigator.clipboard.writeText(textToCopy).then(() => {
         toast({ title: "Outline copied to clipboard!" });
@@ -306,21 +320,6 @@ const TaskNode = ({
     });
   };
 
-  const formatTaskToString = (taskToFormat: Task, level: number): string => {
-    const indent = '  '.repeat(level);
-    const statusIcon = taskToFormat.status === 'done' ? '[x]' : '[ ]';
-    let output = `${indent}- ${statusIcon} ${taskToFormat.text}\n`;
-    
-    if (taskToFormat.description) {
-        const descriptionIndent = '  '.repeat(level + 1);
-        output += `${descriptionIndent}${taskToFormat.description.replace(/\n/g, `\n${descriptionIndent}`)}\n`;
-    }
-
-    if (taskToFormat.subtasks && taskToFormat.subtasks.length > 0) {
-        output += taskToFormat.subtasks.map(subtask => formatTaskToString(subtask, level + 1)).join('');
-    }
-    return output;
-  };
 
   return (
     <div
@@ -534,6 +533,21 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
     const [generationInput, setGenerationInput] = useState('');
     const [generationImage, setGenerationImage] = useState<{file: File, dataUri: string} | null>(null);
     const [generationPersona, setGenerationPersona] = useState<Persona | null>(null);
+
+    const formatTaskToString = useCallback((taskToFormat: Task, level: number): string => {
+        const indent = '  '.repeat(level);
+        const statusIcon = taskToFormat.status === 'done' ? '[x]' : '[ ]';
+        let output = `${indent}- ${statusIcon} ${taskToFormat.text}\n`;
+        
+        if (taskToFormat.description) {
+            const descriptionIndent = '  '.repeat(level + 1);
+            output += `${descriptionIndent}${taskToFormat.description.replace(/\n/g, `\n${descriptionIndent}`)}\n`;
+        }
+        if (taskToFormat.subtasks && taskToFormat.subtasks.length > 0) {
+            output += taskToFormat.subtasks.map(subtask => formatTaskToString(subtask, level + 1)).join('');
+        }
+        return output;
+    }, []);
 
     const handleUpdateTask = useCallback((updatedTask: Task) => {
         onUpdateTaskAndPropagate(project.id, updatedTask);
@@ -918,7 +932,12 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                         onAddSubtask={handleAddSubtaskCallback}
                         onAddCommentClick={onAddCommentClick}
                         onExecuteClick={onExecuteClick}
-                        onRegenerateTask={(...args) => handleOpenGenerationDialog('task', false, args[2])}
+                        onRegenerateTask={(projectId, taskId, originalTask, ...rest) => {
+                            const task = findTaskRecursive(tasks, taskId);
+                            if (task) {
+                                handleOpenGenerationDialog('task', false, task);
+                            }
+                        }}
                         onGenerateSubtasks={(...args) => handleOpenGenerationDialog('subtasks', args[1], args[0])}
                         sortOption={sortOption}
                     />

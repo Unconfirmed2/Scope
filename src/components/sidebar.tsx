@@ -499,7 +499,7 @@ export function Sidebar({
                       key={task.id}
                       task={task}
                       project={project}
-                      allProjects={allProjects}
+                      allProjects={projects}
                       level={0}
                       activeTaskId={activeTaskId}
                       onItemSelect={onItemSelect}

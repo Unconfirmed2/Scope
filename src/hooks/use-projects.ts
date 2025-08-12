@@ -7,7 +7,7 @@ import type { Project, Task, TaskStatus, Comment, CommentStatus, Summary, Execut
 import { useToast } from '@/hooks/use-toast';
 import { findTaskPath, findTaskRecursive } from '@/lib/utils';
 import { handleExecuteTask, handleRegenerateTask } from '@/app/actions';
-import { useAuth } from './use-auth.tsx';
+import { useAuth } from './use-auth';
 
 
 const initialUnassignedProject: Project = {
@@ -466,8 +466,14 @@ export function useProjects() {
             sourceProject.tasks = removeTaskRecursive(sourceProject.tasks);
             
             if (taskToMove) {
+                const task = taskToMove as Task;
                 const highestOrder = Math.max(-1, ...targetProject.tasks.map((t: Task) => t.order ?? 0));
-                const movedTaskWithNewOrder = { ...taskToMove, order: highestOrder + 1, lastEdited: Date.now(), parentId: null };
+                const movedTaskWithNewOrder: Task = {
+                    ...task,
+                    order: highestOrder + 1,
+                    lastEdited: Date.now(),
+                    parentId: null
+                };
                 targetProject.tasks.push(movedTaskWithNewOrder);
     
                 sourceProject.lastEdited = Date.now();
@@ -515,8 +521,9 @@ export function useProjects() {
             project.tasks = findAndRemoveSubtask(project.tasks);
 
             if (subtaskToPromote) {
+                const task = subtaskToPromote as Task;
                 const highestOrder = Math.max(-1, ...project.tasks.map((t:Task) => t.order ?? 0));
-                subtaskToPromote.order = highestOrder + 1;
+                task.order = highestOrder + 1;
                 project.tasks.push(subtaskToPromote);
                 project.lastEdited = Date.now();
                 promoted = true;
@@ -632,7 +639,7 @@ export function useProjects() {
             while(currentId) {
                 const parentId = parentMap.get(currentId);
                 if (parentId) idsToUpdate.add(parentId);
-                currentId = parentId;
+                currentId = parentId || null;
             }
         } else { // If childId is null, we need to check all parents
             taskMap.forEach((_, key) => idsToUpdate.add(key));

@@ -41,6 +41,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import Image from 'next/image';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
+import { personas } from '@/lib/personas';
 
 const readFileAsDataURL = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -51,17 +52,6 @@ const readFileAsDataURL = (file: File): Promise<string> => {
     });
 };
 
-export const personas: {id: Persona, title: string, description: string}[] = [
-    { id: 'Creative Director', title: 'Brainstorm Ideas', description: 'Generates concepts, mind maps, and idea clusters for projects, content, or campaigns.' },
-    { id: 'Planner', title: 'Plan Something', description: 'Builds structured plans like trip itineraries, event timelines, launch schedules, or phased roadmaps.' },
-    { id: 'Operations Manager', title: 'Build a Checklist or SOP', description: 'Creates step-by-step checklists, safety protocols, or standard operating procedures.' },
-    { id: 'Analyst', title: 'Analyze or Calculate', description: 'Handles market sizing, financial models, projections, and scenario analysis.' },
-    { id: 'Educator', title: 'Learn or Explain a Topic', description: 'Delivers structured, multi-level explanations, lessons, or study guides.' },
-    { id: 'Strategist', title: 'Draft a Strategy or Playbook', description: 'Builds marketing, sales, or operational strategies with timelines, KPIs, and resources.' },
-    { id: 'Writer', title: 'Document or Write', description: 'Produces structured documentation, manuals, or instruction sets.' },
-    { id: 'Organizer', title: 'Organize or Prioritize Tasks', description: 'Converts tasks into timelines, Kanban boards, or priority-based action plans.' },
-    { id: 'General Assistant', title: 'Other / Catch-All', description: 'Acts as a flexible, adaptive assistant to clarify the request and break it down into a structured outline.' },
-];
 
 const convertJsonToTasks = (jsonData: any[], parentId: string | null): Task[] => {
     if (!Array.isArray(jsonData)) {
@@ -475,7 +465,7 @@ export default function Home() {
     
     toast({ title: 'Generating summary...', description: `The AI is analyzing "${'name' in itemToSummarize ? itemToSummarize.name : itemToSummarize.text}".` });
     
-    const result = await handleGenerateProjectSummary(activeProject, activeTask, latestSummary);
+    const result = await handleGenerateProjectSummary(activeProject, activeTask || undefined, latestSummary);
     
      if (result.success && result.summary) {
         if (activeTask) {
@@ -976,26 +966,34 @@ export default function Home() {
                              <TabsContent value="comments">
                                 <CommentsView 
                                     project={activeProject}
-                                    activeTask={activeTask}
+                                    activeTask={activeTask || undefined}
                                     onAddComment={(...args) => {
-                                        if (addCommentToTask(...args)) {
+                                        const result = addCommentToTask(...args);
+                                        if (result) {
                                             toast({ title: 'Comment added', variant: 'default' });
                                         }
+                                        return result;
                                     }}
                                     onAddReply={(...args) => {
-                                        if (addReplyToComment(...args)) {
+                                        const result = addReplyToComment(...args);
+                                        if (result) {
                                             toast({ title: 'Reply added', variant: 'default' });
                                         }
+                                        return result;
                                     }}
                                     onUpdateComment={(...args) => {
-                                        if (updateComment(...args)) {
+                                        const result = updateComment(...args);
+                                        if (result) {
                                             toast({ title: 'Comment updated', variant: 'default' });
                                         }
+                                        return result;
                                     }}
                                     onDeleteComment={(...args) => {
-                                        if (deleteComment(...args)) {
+                                        const result = deleteComment(...args);
+                                        if (result) {
                                             toast({ title: 'Comment deleted', variant: 'default' });
                                         }
+                                        return result;
                                     }}
                                     onItemSelect={(taskId) => setActiveItem({ projectId: activeProject.id, taskId: taskId })}
                                 />
