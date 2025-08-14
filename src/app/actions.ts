@@ -6,7 +6,8 @@ import { executeTask, type ExecuteTaskInput } from '@/ai/flows/execute-task';
 import { regenerateTask, type RegenerateTaskInput } from '@/ai/flows/regenerate-task';
 import { generateTaskSteps, type GenerateTaskStepsInput, type GenerateTaskStepsOutput } from '@/ai/flows/generate-task-steps';
 import { z } from 'zod';
-import { Persona, type Task, type Project, type CommentStatus, type TaskStatus, type Comment, type ExecutionResult } from '@/lib/types';
+import { rephraseGoal, type RephraseGoalInput, type RephraseGoalOutput } from '@/ai/flows/rephrase-goal';
+import { type Task, type Project, type CommentStatus, type TaskStatus, type Comment, type ExecutionResult } from '@/lib/types';
 
 
 const GenerateTasksInputSchema = z.object({
@@ -15,7 +16,6 @@ const GenerateTasksInputSchema = z.object({
     projectName: z.string().optional(),
     existingTasks: z.array(z.string()).optional(),
     photoDataUri: z.string().optional(),
-    persona: z.nativeEnum(Persona).optional().nullable(),
 });
 type GenerateTasksInput = z.infer<typeof GenerateTasksInputSchema>;
 
@@ -23,19 +23,40 @@ export async function handleGenerateTasks(input: GenerateTasksInput): Promise<{ 
      try {
         const validatedInput = GenerateTasksInputSchema.parse(input);
         
-        const flowInput: GenerateTaskStepsInput = {
+    const flowInput: GenerateTaskStepsInput = {
             goal: validatedInput.goal,
             userInput: validatedInput.userInput,
             projectName: validatedInput.projectName,
             existingTasks: validatedInput.existingTasks,
             photoDataUri: validatedInput.photoDataUri,
-            persona: validatedInput.persona,
         };
 
         const result = await generateTaskSteps(flowInput);
         return { success: true, data: result };
     } catch (error) {
         console.error("Error in handleGenerateTasks:", error);
+        const errorMessage = error instanceof Error ? error.message : 'An unexpected response was received from the server.';
+        return { success: false, error: errorMessage };
+    }
+}
+
+const RephraseInputSchema = z.object({
+    goal: z.string(),
+    userInput: z.string().optional(),
+    projectName: z.string().optional(),
+    existingTasks: z.array(z.string()).optional(),
+    photoDataUri: z.string().optional(),
+});
+type RephraseInput = z.infer<typeof RephraseInputSchema>;
+
+export async function handleRephraseGoal(input: RephraseInput): Promise<{ success: boolean; data?: RephraseGoalOutput; error?: string }> {
+    try {
+        const validated = RephraseInputSchema.parse(input);
+        const flowInput: RephraseGoalInput = validated;
+        const result = await rephraseGoal(flowInput);
+        return { success: true, data: result };
+    } catch (error) {
+        console.error('Error in handleRephraseGoal:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unexpected response was received from the server.';
         return { success: false, error: errorMessage };
     }
@@ -131,7 +152,6 @@ export async function handleExecuteTask(input: ExecuteTaskInput) {
 const regenerateTaskSchema = z.object({
     originalTask: z.string(),
     userInput: z.string().optional(),
-    persona: z.nativeEnum(Persona).optional().nullable(),
 });
 
 export async function handleRegenerateTask(input: RegenerateTaskInput) {

@@ -6,7 +6,7 @@ export const anthropic = new Anthropic({
 });
 
 // Claude model configuration
-export const CLAUDE_MODEL = 'claude-3-5-sonnet-20241022';
+export const CLAUDE_MODEL = 'claude-4-sonnet-20250514';
 
 // Helper function for generating content with Claude
 export async function generateContent(
@@ -18,6 +18,7 @@ export async function generateContent(
     const message = await anthropic.messages.create({
       model: CLAUDE_MODEL,
       max_tokens: maxTokens,
+  temperature: 0.2,
       messages: [
         {
           role: 'user',
@@ -27,12 +28,16 @@ export async function generateContent(
       ...(systemPrompt && { system: systemPrompt }),
     });
 
-    const content = message.content[0];
-    if (content.type === 'text') {
-      return content.text;
-    }
-    
-    throw new Error('Unexpected response format from Claude API');
+    // Concatenate any text parts; ignore non-text blocks like tool_use/images
+    const text = message.content
+      .filter((block: any) => block && block.type === 'text' && typeof block.text === 'string')
+      .map((block: any) => block.text)
+      .join('\n')
+      .trim();
+
+    if (text.length > 0) return text;
+
+    throw new Error('Unexpected response format from Claude API (no text content)');
   } catch (error) {
     console.error('Error calling Claude API:', error);
     throw new Error('Failed to generate content with Claude API');

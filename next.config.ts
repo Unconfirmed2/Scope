@@ -7,13 +7,19 @@ const forwardingDomain = process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN ||
 const codespaceOrigin = codespaceName
   ? `https://${codespaceName}-${DEV_PORT}.${forwardingDomain}`
   : undefined;
+const codespaceHost = (() => {
+  try {
+    return codespaceOrigin ? new URL(codespaceOrigin).host : undefined;
+  } catch {
+    return undefined;
+  }
+})();
 
-const allowedOrigins = [
-  `http://localhost:${DEV_PORT}`,
-  `http://127.0.0.1:${DEV_PORT}`,
-  ...(codespaceOrigin ? [codespaceOrigin] : []),
-  // Add the specific Codespace hostname for current error
-  'https://cautious-telegram-r7g6q97wvx4cxq44-3000.app.github.dev',
+// Next compares against the Origin header value (host[:port]), not a full URL.
+const localAllowedHosts = [
+  `localhost:${DEV_PORT}`,
+  `127.0.0.1:${DEV_PORT}`,
+  `0.0.0.0:${DEV_PORT}`,
 ];
 
 const nextConfig: NextConfig = {
@@ -31,11 +37,8 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: {
       allowedOrigins: [
-        `http://localhost:${DEV_PORT}`,
-        `http://127.0.0.1:${DEV_PORT}`,
-        `http://0.0.0.0:${DEV_PORT}`,
-        ...(codespaceOrigin ? [codespaceOrigin] : []),
-        'https://cautious-telegram-r7g6q97wvx4cxq44-3000.app.github.dev',
+        ...localAllowedHosts,
+        ...(codespaceHost ? [codespaceHost] : []),
       ],
     },
   },

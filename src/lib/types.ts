@@ -64,14 +64,4 @@ export type SortOption = {
     direction: SortDirection;
 };
 
-export enum Persona {
-  CreativeDirector = 'Creative Director',
-  Planner = 'Planner',
-  OperationsManager = 'Operations Manager',
-  Analyst = 'Analyst',
-  Educator = 'Educator',
-  Strategist = 'Strategist',
-  Writer = 'Writer',
-  Organizer = 'Organizer',
-  GeneralAssistant = 'General Assistant',
-}
+// Persona feature removed

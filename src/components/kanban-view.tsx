@@ -1,11 +1,11 @@
 
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { Project, Task, TaskStatus } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { cn } from '@/lib/utils';
-import { ChevronsRight, ChevronsLeft } from 'lucide-react';
+// import { cn } from '@/lib/utils';
+// import { ChevronsRight, ChevronsLeft } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 

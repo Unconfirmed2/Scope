@@ -2,7 +2,6 @@
 'use client';
 import { useState, useCallback, useContext, createContext, useRef, useEffect, useMemo } from 'react';
 import type { Project, Task, AIStep, TaskStatus, SortOption } from '@/lib/types';
-import { Persona } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { BrainCircuit, Trash2, RotateCw, FolderSymlink, ArrowUpRightSquare, ChevronRight, MoreHorizontal, PlusCircle, MessageSquare, Pencil, Zap, CornerDownRight, ArrowUp, ArrowDown, ImagePlus, ClipboardCopy, CheckSquare, Square, Wand2, FileText, ArrowUpDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -12,8 +11,8 @@ import Linkify from 'linkify-react';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Checkbox } from './ui/checkbox';
-import { countDirectSubtasks, sortTasks, findTaskPath, findTaskRecursive } from '@/lib/utils';
-import { personas } from '@/lib/personas';
+import { countDirectSubtasks, sortTasks, sortTasksShallow, findTaskPath, findTaskRecursive } from '@/lib/utils';
+// Persona feature removed
 import {
     Dialog,
     DialogContent,
@@ -64,7 +63,7 @@ type TreeViewProps = {
   onAddSubtask: (projectId: string, parentId: string, subtasks: Task[], isSibling: boolean) => void;
   onAddCommentClick: (task: Task) => void;
   onExecuteClick: (task: Task) => void;
-  onRegenerateTask: (projectId: string, taskId: string, originalTask: string, userInput?: string, persona?: Persona | null) => void;
+    onRegenerateTask: (projectId: string, taskId: string, originalTask: string, userInput?: string) => void;
   onDeleteTask: (projectId: string, taskId: string) => void;
   sortOption: SortOption;
   onSetSortOption: (option: SortOption) => void;
@@ -178,8 +177,8 @@ const TaskNode = ({
     onAddSubtask: (parentId: string, subtasks: Task[], isSibling: boolean) => void;
     onAddCommentClick: (task: Task) => void;
     onExecuteClick: (task: Task) => void;
-    onRegenerateTask: (projectId: string, taskId: string, originalTask: string, userInput?: string, persona?: Persona | null) => void;
-    onGenerateSubtasks: (task: Task, isRegeneration: boolean, userInput?: string, photoDataUri?: string, persona?: Persona | null) => void;
+    onRegenerateTask: (projectId: string, taskId: string, originalTask: string, userInput?: string) => void;
+    onGenerateSubtasks: (task: Task, isRegeneration: boolean, userInput?: string, photoDataUri?: string) => void;
     sortOption: SortOption;
 }) => {
   const { collapsedNodes, toggleNode } = useTreeState();
@@ -237,7 +236,8 @@ const TaskNode = ({
     onUpdateTask({ ...task, status: newStatus });
   };
   
-  const sortedSubtasks = hasSubtasks ? sortTasks(task.subtasks, sortOption) : [];
+    // Preserve original order for children; main page sorting should only affect top-level scopes
+    const sortedSubtasks = hasSubtasks ? task.subtasks : [];
 
   const statusSelector = (
     <Select value={task.status} onValueChange={handleStatusChange} disabled={hasSubtasks}>
@@ -532,7 +532,7 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
     const [isGenerating, setIsGenerating] = useState<{ open: boolean, type: 'subtasks' | 'task', isRegen: boolean, task: Task | null }>({ open: false, type: 'subtasks', isRegen: false, task: null });
     const [generationInput, setGenerationInput] = useState('');
     const [generationImage, setGenerationImage] = useState<{file: File, dataUri: string} | null>(null);
-    const [generationPersona, setGenerationPersona] = useState<Persona | null>(null);
+    // Persona state removed
 
     const formatTaskToString = useCallback((taskToFormat: Task, level: number): string => {
         const indent = '  '.repeat(level);
@@ -566,36 +566,57 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
         }
     };
 
-    const convertJsonToTasks = (jsonData: any[], parentId: string, baseOrder: number): Task[] => {
-        if (!Array.isArray(jsonData)) {
-            return [];
-        }
+    // Convert arbitrary raw JSON into Task[] for sub-scope generation
+    const convertRawToTasks = (raw: any, parentId: string, baseOrder: number): Task[] => {
+        const makeTask = (text: string, index: number, currentParentId: string | null, description = '', children: Task[] = []): Task => ({
+            id: crypto.randomUUID(),
+            text,
+            description,
+            completed: false,
+            status: 'todo',
+            subtasks: children,
+            lastEdited: Date.now(),
+            order: baseOrder + index,
+            parentId: currentParentId,
+            comments: [],
+            executionResults: [],
+            summaries: [],
+            source: 'ai',
+        });
 
-        const mapItem = (item: any, index: number, currentParentId: string | null): Task => {
-            const id = crypto.randomUUID();
-            const subtasks: Task[] = item.children ? convertJsonToTasks(item.children, id, 0) : [];
-            
-            return {
-                id,
-                text: `${item.title}`,
-                description: item.content?.join('\n') || '',
-                completed: false,
-                status: 'todo',
-                subtasks,
-                lastEdited: Date.now(),
-                order: baseOrder + index,
-                parentId: currentParentId,
-                comments: [],
-                executionResults: [],
-                summaries: [],
-                source: 'ai'
-            };
+        const fromAny = (value: any, currentParentId: string | null): Task[] => {
+            if (value == null) return [];
+            if (Array.isArray(value)) {
+                return value.flatMap((v, i) => {
+                    const ts = fromAny(v, currentParentId);
+                    // apply index at this depth
+                    return ts.length ? ts.map((t, idx) => ({ ...t, order: baseOrder + i + idx })) : [];
+                });
+            }
+            if (typeof value === 'object') {
+                if ('title' in value || 'name' in value) {
+                    const title = String((value as any).title ?? (value as any).name);
+                    const contentText = Array.isArray((value as any).content) ? (value as any).content.join('\n') : '';
+                    const childrenRaw = (value as any).children ?? (value as any).items ?? null;
+                    const children = childrenRaw ? convertRawToTasks(childrenRaw, null as any, 0) : [];
+                    return [makeTask(title, 0, currentParentId, contentText, children)];
+                }
+                const entries = Object.entries(value);
+                return entries.map(([k, val], idx) => {
+                    const children = convertRawToTasks(val, null as any, 0);
+                    const desc = typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean' ? String(val) : '';
+                    return makeTask(String(k), idx, currentParentId, desc, children);
+                });
+            }
+            return [makeTask(String(value), 0, currentParentId)];
         };
 
-        return jsonData.map((item, index) => mapItem(item, index, parentId));
+        // top-level ordering
+        const top = fromAny(raw, parentId);
+        return top.map((t, i) => ({ ...t, order: baseOrder + i, parentId }));
     };
   
-    const handleGenerateSubtasksCallback = useCallback(async (parentTask: Task, isRegeneration: boolean, userInput?: string, photoDataUri?: string, persona?: Persona | null) => {
+    const handleGenerateSubtasksCallback = useCallback(async (parentTask: Task, isRegeneration: boolean, userInput?: string, photoDataUri?: string) => {
         toast({ title: 'AI is thinking...', description: `Generating sub-scopes for "${parentTask.text}"` });
         
         const existingSubtaskNames = (parentTask.subtasks || []).map(t => t.text);
@@ -606,11 +627,11 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
           projectName: isUnassigned ? undefined : project.name,
           existingTasks: isUnassigned ? [] : existingSubtaskNames,
           photoDataUri: photoDataUri,
-          persona: persona,
+          
         });
 
         if (result.success && result.data) {
-            const newSubtasks = convertJsonToTasks(result.data?.breakdown_items || [], parentTask.id, 0);
+            const newSubtasks = convertRawToTasks(result.data.raw, parentTask.id, 0);
             
             if (isRegeneration) {
                 // To regenerate, we first need to find the task and replace its subtasks.
@@ -641,8 +662,8 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
         onAddSubtask(project.id, anchorTaskId, subtasks, isSibling);
     }, [project.id, onAddSubtask]);
     
-    const handleRegenerateTaskCallback = useCallback((projectId: string, taskId: string, originalTask: string, userInput?: string, persona?: Persona | null) => {
-        onRegenerateTask(projectId, taskId, originalTask, userInput, persona)
+    const handleRegenerateTaskCallback = useCallback((projectId: string, taskId: string, originalTask: string, userInput?: string) => {
+        onRegenerateTask(projectId, taskId, originalTask, userInput)
     }, [onRegenerateTask]);
 
     const handleToggleAll = () => {
@@ -709,7 +730,8 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
         complexity: 'Complexity',
     };
     
-    const sortedTasks = sortTasks(tasks, sortOption);
+    // Only sort the highest-level scopes in the main page
+    const sortedTasks = sortTasksShallow(tasks, sortOption);
     
     const allTaskIds = useMemo(() => {
         const ids: string[] = [];
@@ -776,7 +798,7 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
         setIsGenerating({ open: false, type: 'subtasks', isRegen: false, task: null });
         setGenerationInput('');
         setGenerationImage(null);
-        setGenerationPersona(null);
+        
     };
 
     const handleGenerationSubmit = () => {
@@ -784,9 +806,9 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
         if (!taskToActOn) return;
 
         if (isGenerating.type === 'subtasks') {
-            handleGenerateSubtasksCallback(taskToActOn, isGenerating.isRegen, generationInput, generationImage?.dataUri, generationPersona);
+            handleGenerateSubtasksCallback(taskToActOn, isGenerating.isRegen, generationInput, generationImage?.dataUri);
         } else {
-            handleRegenerateTaskCallback(project.id, taskToActOn.id, taskToActOn.text, generationInput, generationPersona);
+            handleRegenerateTaskCallback(project.id, taskToActOn.id, taskToActOn.text, generationInput);
         }
         closeGenerationDialog();
     };
@@ -957,28 +979,7 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                             {isGenerating.task?.text}
                         </DialogDescription>
                     </DialogHeader>
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button className="w-full flex-shrink-0 justify-between" variant="outline">
-                                <span className="truncate">{generationPersona ? personas.find(p => p.id === generationPersona)?.title : 'Select Persona (Optional)'}</span>
-                                <ArrowUpDown />
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width]">
-                            <ScrollArea className="h-64">
-                                <DropdownMenuRadioGroup value={generationPersona || ''} onValueChange={(v) => setGenerationPersona(v as Persona)}>
-                                    {personas.map((persona) => (
-                                        <DropdownMenuRadioItem key={persona.id} value={persona.id} className="cursor-pointer">
-                                            <div className="flex flex-col items-start">
-                                                <div className="font-semibold">{persona.title}</div>
-                                                <div className="text-xs text-muted-foreground text-wrap">{persona.description}</div>
-                                            </div>
-                                        </DropdownMenuRadioItem>
-                                    ))}
-                                </DropdownMenuRadioGroup>
-                            </ScrollArea>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                    {/* Persona selection removed */}
                     <Textarea 
                         value={generationInput}
                         onChange={(e) => setGenerationInput(e.target.value)}

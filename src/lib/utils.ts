@@ -67,7 +67,7 @@ function calculateProjectComplexity(project: Project): number {
     return project.tasks.reduce((acc, task) => acc + calculateTaskComplexity(task), 0);
 }
 
-export function sortTasks(tasks: Task[], option: SortOption): Task[] {
+export function sortTasks(tasks: Task[], option: SortOption, opts?: { recursive?: boolean }): Task[] {
   const sortedTasks = [...tasks];
   const directionMultiplier = option.direction === 'asc' ? 1 : -1;
 
@@ -92,11 +92,43 @@ export function sortTasks(tasks: Task[], option: SortOption): Task[] {
         break;
   }
   
-  // Recursively sort subtasks
-  return sortedTasks.map(task => ({
-      ...task,
-      subtasks: task.subtasks && task.subtasks.length > 0 ? sortTasks(task.subtasks, option) : []
-  }));
+    // Recursively sort subtasks only if requested
+    if (opts?.recursive) {
+        return sortedTasks.map(task => ({
+            ...task,
+            subtasks: task.subtasks && task.subtasks.length > 0 ? sortTasks(task.subtasks, option, opts) : []
+        }));
+    }
+    return sortedTasks;
+}
+
+// Shallow sort: only sort the provided list; leave children as-is without recursive sorting
+export function sortTasksShallow(tasks: Task[], option: SortOption): Task[] {
+    const sortedTasks = [...tasks];
+    const directionMultiplier = option.direction === 'asc' ? 1 : -1;
+
+    switch(option.key) {
+        case 'completion':
+            sortedTasks.sort((a, b) => {
+                const statusOrder = { 'todo': 0, 'inprogress': 1, 'done': 2 } as const;
+                return (statusOrder[a.status] - statusOrder[b.status]) * directionMultiplier;
+            });
+            break;
+        case 'complexity':
+            sortedTasks.sort((a, b) => (calculateTaskComplexity(a) - calculateTaskComplexity(b)) * directionMultiplier);
+            break;
+        case 'edit-date':
+            sortedTasks.sort((a, b) => (a.lastEdited - b.lastEdited) * directionMultiplier);
+            break;
+        case 'name':
+            sortedTasks.sort((a, b) => a.text.localeCompare(b.text) * directionMultiplier);
+            break;
+        default:
+            sortedTasks.sort((a, b) => ((a.order ?? 0) - (b.order ?? 0)) * directionMultiplier);
+            break;
+    }
+
+    return sortedTasks;
 }
 
 export function sortProjects(projects: Project[], option: SortOption): Project[] {
@@ -137,7 +169,7 @@ export function sortProjects(projects: Project[], option: SortOption): Project[]
 
 
 export function findTaskPath(tasks: Task[], taskId: string, options?: { sort?: boolean, sortOption?: SortOption }): Task[] {
-    const tasksToSearch = options?.sort && options?.sortOption ? sortTasks(tasks, options.sortOption) : tasks;
+    const tasksToSearch = options?.sort && options?.sortOption ? sortTasks(tasks, options.sortOption, { recursive: false }) : tasks;
     
     for (const task of tasksToSearch) {
         if (task.id === taskId) {

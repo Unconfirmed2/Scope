@@ -2,13 +2,13 @@
 'use client';
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import type { Task, AIStep, SortOption, Project, Comment, Summary, ExecutionResult } from '@/lib/types';
-import { Persona } from '@/lib/types';
-import { handleGenerateTasks, handleExecuteTask as handleExecuteTaskAction, handleGenerateProjectSummary } from './actions';
+import type { Task, SortOption, Project } from '@/lib/types';
+// Persona feature removed
+import { handleGenerateTasks, handleGenerateProjectSummary, handleRephraseGoal } from './actions';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, ArrowUpDown, Pencil, ChevronRight, MessageSquare, BrainCircuit, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Wand2, CornerDownRight, PlusCircle, Info, ArrowUp, ArrowDown, Settings, Menu, HelpCircle, Folder, File, Zap as ZapIcon, Bot, List, Map, Columns, CaseSensitive, BookOpen, LogOut, User, ImagePlus } from 'lucide-react';
+import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, ArrowUpDown, Pencil, ChevronRight, MessageSquare, BrainCircuit, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, Folder, File, Zap as ZapIcon, Bot, List, Map, Columns, LogOut, User, ImagePlus } from 'lucide-react';
 import { Sidebar } from '@/components/sidebar';
 import { TreeViewWrapper as TreeView } from '@/components/tree-view';
 import { KanbanView } from '@/components/kanban-view';
@@ -20,28 +20,28 @@ import { AuthDialog } from '@/components/auth-dialog';
 import { SettingsDialog } from '@/components/settings-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from '@/components/ui/textarea';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { useProjects } from '@/hooks/use-projects';
 import { findTaskPath, countCommentsRecursively, sortProjects } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { Label } from '@/components/ui/label';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+// import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import type { GenerateTaskStepsOutput } from '@/ai/flows/generate-task-steps';
-import { Slider } from '@/components/ui/slider';
+// import { Slider } from '@/components/ui/slider';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import Linkify from 'linkify-react';
+// import Linkify from 'linkify-react';
 import React from 'react';
 import { useAuth } from '@/hooks/use-auth';
-import { useRouter } from 'next/navigation';
+// import { useRouter } from 'next/navigation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import Image from 'next/image';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
-import { personas } from '@/lib/personas';
+// Persona feature removed
 
 const readFileAsDataURL = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -53,39 +53,91 @@ const readFileAsDataURL = (file: File): Promise<string> => {
 };
 
 
-const convertJsonToTasks = (jsonData: any[], parentId: string | null): Task[] => {
-    if (!Array.isArray(jsonData)) {
-        return [];
+// Pretty-print JSON for human-readable preview
+const prettyPrintJson = (data: any): string => {
+    if (data == null) return '';
+    if (typeof data === 'string') return data.trim();
+    try {
+        return JSON.stringify(data, null, 2);
+    } catch {
+        return String(data);
     }
+};
 
-    const mapItem = (item: any, index: number, currentParentId: string | null): Task => {
-        const id = crypto.randomUUID();
-        const subtasks: Task[] = item.children ? convertJsonToTasks(item.children, id) : [];
-        
-        return {
-            id,
-            text: `${item.title}`,
-            description: item.content?.join('\n') || '',
-            completed: false,
-            status: 'todo',
-            subtasks,
-            lastEdited: Date.now(),
-            order: index,
-            parentId: currentParentId,
-            comments: [],
-            executionResults: [],
-            summaries: [],
-            source: 'ai'
-        };
+// Convert arbitrary raw JSON into Task[]
+const convertRawToTasks = (raw: any, parentId: string | null): Task[] => {
+    const humanizeKey = (key: string, value?: any): string => {
+        if (!key) return '';
+        let s = String(key)
+            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+            .replace(/[\-_]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase();
+        if (typeof value === 'number' && !Number.isNaN(value)) {
+            if (value !== 1) {
+                const parts = s.split(' ');
+                const last = parts[parts.length - 1];
+                if (last && !/s$/.test(last)) {
+                    parts[parts.length - 1] = last + 's';
+                    s = parts.join(' ');
+                }
+            }
+        }
+        // Capitalize first letter
+        return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
     };
 
-    return jsonData.map((item, index) => mapItem(item, index, parentId));
+    const makeTask = (text: string, index: number, currentParentId: string | null, description = '', children: Task[] = []): Task => ({
+        id: crypto.randomUUID(),
+        text,
+        description,
+        completed: false,
+        status: 'todo',
+        subtasks: children,
+        lastEdited: Date.now(),
+        order: index,
+        parentId: currentParentId,
+        comments: [],
+        executionResults: [],
+        summaries: [],
+        source: 'ai',
+    });
+
+    const fromAny = (value: any, currentParentId: string | null): Task[] => {
+        if (value == null) return [];
+        if (Array.isArray(value)) {
+            return value.flatMap((v, i) => fromAny(v, currentParentId));
+        }
+        if (typeof value === 'object') {
+            // Generic object: each key becomes a task with nested conversion of its value
+        return Object.entries(value).map(([k, val], idx) => {
+                if (
+                    typeof val === 'string' ||
+                    typeof val === 'number' ||
+                    typeof val === 'boolean'
+                ) {
+            // Primitive: render inline in text e.g., "timing: Serve 15-20 minutes before main"
+            const inline = `${humanizeKey(String(k), val)}: ${String(val)}`;
+            return makeTask(inline, idx, currentParentId, '', []);
+                }
+                // Non-primitive: children derived recursively
+                const children = fromAny(val, null);
+                return makeTask(humanizeKey(String(k)), idx, currentParentId, '', children);
+            });
+        }
+        // Primitive
+        return [makeTask(String(value), 0, currentParentId)];
+    };
+
+    // Assign order indices at the top level
+    const top = fromAny(raw, parentId);
+    return top.map((t, i) => ({ ...t, order: i, parentId }));
 };
 
 
 export default function Home() {
-  const { user, loading: authLoading, logOut } = useAuth();
-  const router = useRouter();
+    const { user, loading: authLoading, logOut } = useAuth();
 
   const { toast } = useToast();
   const { 
@@ -137,12 +189,14 @@ export default function Home() {
   const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
-  const [aiConfirmationResponse, setAiConfirmationResponse] = useState<GenerateTaskStepsOutput | null>(null);
-  const [isConfirmationDialogOpen, setIsConfirmationDialogOpen] = useState(false);
+    const [aiConfirmationResponse, setAiConfirmationResponse] = useState<GenerateTaskStepsOutput | null>(null);
+    const [isConfirmationDialogOpen, setIsConfirmationDialogOpen] = useState(false);
+    const [refinedGoal, setRefinedGoal] = useState<string | null>(null);
   const [confirmationInput, setConfirmationInput] = useState('');
   const [confirmationImage, setConfirmationImage] = useState<{file: File, dataUri: string} | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedPersona, setSelectedPersona] = useState<Persona | null>(null);
+    // Persona feature removed
+    const isRefineMode = useMemo(() => Boolean(confirmationInput.trim() || confirmationImage), [confirmationInput, confirmationImage]);
 
   
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>,
@@ -249,23 +303,20 @@ export default function Home() {
     setIsGenerating(true);
 
     try {
-        toast({ title: 'AI is thinking...', description: 'Analyzing your goal as a case study.' });
-        
+        toast({ title: 'Clarifying scope...', description: 'AI is rephrasing for clarity.' });
         const isUnassigned = targetProject.id === 'unassigned';
-        const result = await handleGenerateTasks({
-            goal: goal,
+        const result = await handleRephraseGoal({
+            goal,
             projectName: isUnassigned ? undefined : targetProject.name,
             existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
             photoDataUri: goalImage?.dataUri,
-            persona: selectedPersona
         });
-
         if (!result.success || !result.data) {
-            toast({ variant: 'destructive', title: 'AI Generation Failed', description: result.error || 'The AI did not return a valid structure.' });
+            toast({ variant: 'destructive', title: 'Rephrase Failed', description: result.error || 'The AI could not rephrase the scope.' });
             return;
         }
-
-        setAiConfirmationResponse(result.data);
+        setRefinedGoal(result.data.goal);
+        setAiConfirmationResponse({ raw: result.data.goal });
         setIsConfirmationDialogOpen(true);
 
     } catch (error) {
@@ -277,7 +328,7 @@ export default function Home() {
   };
 
   const handleAcceptConfirmation = async () => {
-    if (!aiConfirmationResponse || !isLoaded) return;
+    if (!isLoaded) return;
   
     const targetProjectId = activeProjectId || 'unassigned';
     const targetProject = projects.find(p => p.id === targetProjectId);
@@ -291,29 +342,49 @@ export default function Home() {
     setIsConfirmationDialogOpen(false);
   
     try {
-      let finalResponse = aiConfirmationResponse;
-      const isUnassigned = targetProject.id === 'unassigned';
-      
-      const hasNewInput = confirmationInput.trim() || confirmationImage;
-      if (hasNewInput) {
-        toast({ title: 'AI is refining the plan...' });
-        const result = await handleGenerateTasks({
-            goal: goal,
-            projectName: isUnassigned ? undefined : targetProject.name,
-            existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
-            userInput: `The user has provided the following feedback on your plan: "${confirmationInput}". The original synthesis was: "${aiConfirmationResponse.synthesis}". Please adjust the plan accordingly.`,
-            photoDataUri: confirmationImage?.dataUri || goalImage?.dataUri,
-            persona: selectedPersona,
-        });
-        if (!result.success || !result.data) {
-            toast({ variant: 'destructive', title: 'AI Refinement Failed', description: result.error || 'The AI did not return a valid structure.' });
-            setIsGenerating(false);
-            return;
-        }
-        finalResponse = result.data;
-      }
-      
-      const generatedTasks = convertJsonToTasks(finalResponse.breakdown_items, null);
+            const isUnassigned = targetProject.id === 'unassigned';
+
+            // If user provided feedback, refine the goal only (do not generate tasks yet)
+            const hasNewInput = confirmationInput.trim() || confirmationImage;
+            if (hasNewInput) {
+                toast({ title: 'Refining scope...' });
+                const res = await handleRephraseGoal({
+                    goal: refinedGoal || goal,
+                    userInput: confirmationInput.trim() || undefined,
+                    projectName: isUnassigned ? undefined : targetProject.name,
+                    existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
+                    photoDataUri: confirmationImage?.dataUri || goalImage?.dataUri,
+                });
+                if (!res.success || !res.data) {
+                    toast({ variant: 'destructive', title: 'Refine Failed', description: res.error || 'The AI could not refine the scope.' });
+                    setIsGenerating(false);
+                    return;
+                }
+                const newGoal = res.data.goal;
+                setRefinedGoal(newGoal);
+                setAiConfirmationResponse({ raw: newGoal });
+                setConfirmationInput('');
+                setConfirmationImage(null);
+                setIsConfirmationDialogOpen(true); // show dialog again
+                setIsGenerating(false);
+                return; // Stop here; user can iterate further
+            }
+
+            // No feedback: now generate tasks from the final refined goal
+            const finalGoal = refinedGoal || goal;
+            toast({ title: 'Generating scopes...' });
+            const gen = await handleGenerateTasks({
+                goal: finalGoal,
+                projectName: isUnassigned ? undefined : targetProject.name,
+                existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
+                photoDataUri: goalImage?.dataUri,
+            });
+            if (!gen.success || !gen.data) {
+                toast({ variant: 'destructive', title: 'AI Generation Failed', description: gen.error || 'The AI did not return a valid structure.' });
+                setIsGenerating(false);
+                return;
+            }
+            const generatedTasks = convertRawToTasks(gen.data.raw, null);
       
       if (generatedTasks.length === 0) {
          toast({ variant: 'destructive', title: 'AI Generation Failed', description: 'The AI returned an empty or invalid structure.' });
@@ -324,8 +395,8 @@ export default function Home() {
       const highestOrder = Math.max(-1, ...targetProject.tasks.map(t => t.order));
       const newParentTask: Task = {
         id: crypto.randomUUID(),
-        text: goal,
-        description: finalResponse.synthesis,
+    text: finalGoal,
+    description: '',
         completed: false,
         status: 'todo',
         subtasks: generatedTasks,
@@ -346,11 +417,12 @@ export default function Home() {
       setActiveItem({ projectId: targetProjectId, taskId: newParentTask.id });
       
       setActiveTab('list');
-      setGoal('');
+    setGoal('');
       setGoalImage(null);
       setConfirmationInput('');
       setConfirmationImage(null);
-      setAiConfirmationResponse(null);
+    setAiConfirmationResponse(null);
+    setRefinedGoal(null);
 
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred during generation.';
@@ -535,25 +607,14 @@ export default function Home() {
 
   const visibleViewOptions = Object.entries(viewOptions).filter(([, { hidden }]) => !hidden);
   
-  // Recursive renderer for the confirmation dialog
-  const renderConfirmationPlan = (items: any[] | undefined) => {
-    if (!items || items.length === 0) return null;
-    return (
-        <ul className="list-disc pl-5 space-y-2">
-            {items.map((item, index) => (
-                <li key={index}>
-                    <span className="font-semibold">{item.title}</span>
-                    {item.content && (
-                        <p className="text-sm text-muted-foreground whitespace-pre-wrap pl-2">
-                            {item.content.join('\n')}
-                        </p>
-                    )}
-                    {renderConfirmationPlan(item.children)}
-                </li>
-            ))}
-        </ul>
-    );
-  };
+    // Human-readable preview for confirmation: pretty JSON
+    const renderConfirmationJson = (data: any) => {
+        const text = prettyPrintJson(data);
+        if (!text) return null;
+        return (
+            <pre className="text-xs md:text-sm whitespace-pre-wrap break-words">{text}</pre>
+        );
+    };
 
   const formatTaskToMarkdown = (task: Task, level: number): string => {
     const prefix = '#'.repeat(level + 1);
@@ -814,30 +875,6 @@ export default function Home() {
 
                     <form onSubmit={onFormSubmit} className="mb-4 space-y-4">
                         <div className="flex flex-col md:flex-row gap-2">
-                             <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button className="md:w-48 w-full flex-shrink-0 justify-between">
-                                        <span className="truncate">{selectedPersona ? personas.find(p => p.id === selectedPersona)?.title : 'I want to...'}</span>
-                                        <ArrowUpDown />
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent className="w-80" align="start">
-                                    <ScrollArea className="h-96">
-                                        <DropdownMenuLabel>I want to...</DropdownMenuLabel>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuRadioGroup value={selectedPersona || ''} onValueChange={(v) => setSelectedPersona(v as Persona)}>
-                                            {personas.map((persona) => (
-                                                <DropdownMenuRadioItem key={persona.id} value={persona.id} className="cursor-pointer">
-                                                    <div className="flex flex-col items-start">
-                                                        <div className="font-semibold">{persona.title}</div>
-                                                        <div className="text-xs text-muted-foreground text-wrap">{persona.description}</div>
-                                                    </div>
-                                                </DropdownMenuRadioItem>
-                                            ))}
-                                        </DropdownMenuRadioGroup>
-                                    </ScrollArea>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
                             <Input 
                                 id="goal-input"
                                 value={goal}
@@ -848,7 +885,7 @@ export default function Home() {
 
                             />
                              <div className="flex w-full md:w-auto items-center justify-end gap-2 flex-shrink-0">
-                                <Button size="icon" type="submit" disabled={isGenerating || !goal.trim() || !isLoaded || !selectedPersona}>
+                                <Button size="icon" type="submit" disabled={isGenerating || !goal.trim() || !isLoaded}>
                                     {isGenerating ? <Loader2 className="animate-spin" /> : <Plus />}
                                 </Button>
                                 <Button size="icon" type="button" onClick={() => fileInputRef.current?.click()} disabled={isGenerating}>
@@ -1128,25 +1165,23 @@ export default function Home() {
                 </DialogFooter>
             </DialogContent>
         </Dialog>
-        <Dialog open={isConfirmationDialogOpen} onOpenChange={setIsConfirmationDialogOpen}>
+                <Dialog open={isConfirmationDialogOpen} onOpenChange={setIsConfirmationDialogOpen}>
             <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
                 <DialogHeader>
-                    <DialogTitle>AI Generated Plan</DialogTitle>
-                    <DialogDescription>
-                        Review the AI's proposed plan. You can add feedback or accept it.
-                    </DialogDescription>
+                                        <DialogTitle>{isRefineMode ? 'Refine scope' : 'Accept & add scopes'}</DialogTitle>
+                                        <DialogDescription>
+                                                {isRefineMode
+                                                    ? 'Add details or feedback, then click “Refine scope” to iterate. Repeat until you are satisfied.'
+                                                    : 'Review the scope. When you are ready, click “Accept & add scopes” to generate tasks.'}
+                                        </DialogDescription>
                 </DialogHeader>
                 
-                {aiConfirmationResponse?.rephrased_goal && (
-                    <div className="p-3 bg-accent/10 border-l-4 border-accent/50 rounded-r-md mb-4">
-                        <p className="font-semibold text-accent">Here's my understanding of your request:</p>
-                        <p className="text-foreground">{aiConfirmationResponse.rephrased_goal}</p>
-                    </div>
-                )}
-
-                <ScrollArea className="flex-grow border rounded-md p-4 bg-background/50">
-                    {renderConfirmationPlan(aiConfirmationResponse?.breakdown_items)}
-                </ScrollArea>
+                                <ScrollArea className="flex-grow border rounded-md p-4 bg-background/50 space-y-3">
+                                        <div>
+                                            <div className="text-xs uppercase text-muted-foreground mb-1">Current scope</div>
+                                            {renderConfirmationJson(refinedGoal ?? aiConfirmationResponse?.raw ?? goal)}
+                                        </div>
+                                </ScrollArea>
                  <div className="space-y-2 mt-4">
                     <Label htmlFor="confirmation-input">Add details or feedback (optional)</Label>
                     <Textarea
@@ -1186,12 +1221,18 @@ export default function Home() {
                         )}
                     </div>
                 </div>
-                <DialogFooter className="mt-4">
-                    <Button variant="ghost" onClick={() => setIsConfirmationDialogOpen(false)}>Cancel</Button>
-                    <Button onClick={handleAcceptConfirmation} disabled={isGenerating}>
-                        {isGenerating ? <Loader2 className="animate-spin" /> : 'Accept & Add Scopes'}
-                    </Button>
-                </DialogFooter>
+                                                <DialogFooter className="mt-4">
+                                                        <Button variant="ghost" onClick={() => setIsConfirmationDialogOpen(false)}>Cancel</Button>
+                                                        {isRefineMode ? (
+                                                            <Button onClick={handleAcceptConfirmation} disabled={isGenerating}>
+                                                                {isGenerating ? <Loader2 className="animate-spin" /> : 'Refine scope'}
+                                                            </Button>
+                                                        ) : (
+                                                            <Button onClick={handleAcceptConfirmation} disabled={isGenerating}>
+                                                                {isGenerating ? <Loader2 className="animate-spin" /> : 'Accept & add scopes'}
+                                                            </Button>
+                                                        )}
+                                                </DialogFooter>
             </DialogContent>
         </Dialog>
     </div>

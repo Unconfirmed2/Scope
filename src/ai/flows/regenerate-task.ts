@@ -9,12 +9,10 @@
 
 import { generateContent } from '@/ai/claude';
 import { z } from 'zod';
-import { Persona } from '@/lib/types';
 
 const RegenerateTaskInputSchema = z.object({
   originalTask: z.string().describe('The original text of the scope.'),
   userInput: z.string().optional().describe('Additional instructions or feedback from the user on how to improve the scope.'),
-  persona: z.nativeEnum(Persona).optional().nullable(),
 });
 export type RegenerateTaskInput = z.infer<typeof RegenerateTaskInputSchema>;
 
@@ -31,9 +29,6 @@ Rewrite the scope based on the original and the feedback. If feedback is provide
 
 Return only the new scope text, nothing else.`;
 
-  if (validated.persona) {
-    systemPrompt += `\n\nYou should adopt the persona of an expert **${validated.persona}** to guide your response.`;
-  }
 
   let userPrompt = `Original Scope: "${validated.originalTask}"`;
 

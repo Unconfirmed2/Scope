@@ -3,7 +3,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import type { Project, Task, TaskStatus, Comment, CommentStatus, Summary, ExecutionResult, Persona } from '@/lib/types';
+import type { Project, Task, TaskStatus, Comment, CommentStatus, Summary, ExecutionResult } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { findTaskPath, findTaskRecursive } from '@/lib/utils';
 import { handleExecuteTask, handleRegenerateTask } from '@/app/actions';
@@ -820,9 +820,9 @@ export function useProjects() {
         }
     };
     
-    const regenerateTask = async (projectId: string, taskId: string, originalTask: string, userInput?: string, persona?: Persona | null) => {
+    const regenerateTask = async (projectId: string, taskId: string, originalTask: string, userInput?: string) => {
         toast({ title: 'AI is regenerating the scope...' });
-        const result = await handleRegenerateTask({ originalTask, userInput, persona });
+        const result = await handleRegenerateTask({ originalTask, userInput });
         if (result.success && result.newTask) {
             setState(prevState => {
                 const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));

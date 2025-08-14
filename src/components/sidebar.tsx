@@ -6,10 +6,10 @@ import { cn } from '@/lib/utils';
 import type { Project, Task, SortOption, SortKey } from '@/lib/types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { Plus, Lock, ChevronRight, MoreHorizontal, Trash2, FolderSymlink, ChevronsRight, ChevronsLeft, ArrowUpRightSquare, Pin, PinOff, Pencil, ArrowDown, ArrowUp, LogOut, Download } from 'lucide-react';
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Plus, Lock, ChevronRight, MoreHorizontal, Trash2, FolderSymlink, ArrowUpRightSquare, Pin, PinOff, Pencil, ArrowDown, ArrowUp, Download, ChevronsRight, ChevronsLeft } from 'lucide-react';
+// import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Progress } from './ui/progress';
-import { calculateProjectProgress, countDirectSubtasks, sortTasks, findTaskRecursive } from '@/lib/utils';
+import { calculateProjectProgress, countDirectSubtasks, sortTasksShallow, findTaskRecursive } from '@/lib/utils';
 import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   DropdownMenu,
@@ -402,7 +402,8 @@ export function Sidebar({
           const isCollapsed = collapsedProjects[project.id] ?? true;
           const progress = calculateProjectProgress(project.tasks);
           const taskCounts = countDirectSubtasks(project.tasks);
-          const sortedTasks = sortTasks(project.tasks, sortOption);
+          // Only sort top-level scopes; preserve child order from JSON
+          const sortedTasks = sortTasksShallow(project.tasks, sortOption);
           const isProjectActive = project.id === activeProjectId && !activeTaskId;
           const isEditing = editingProjectId === project.id;
 
