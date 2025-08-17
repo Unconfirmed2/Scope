@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Project, Task, TaskStatus, Comment, CommentStatus, Summary, ExecutionResult } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { findTaskPath, findTaskRecursive } from '@/lib/utils';
-import { handleExecuteTask, handleRegenerateTask } from '@/app/actions';
+import { handleExecuteTask } from '@/app/actions';
 import { useAuth } from './use-auth';
 
 
@@ -26,21 +26,35 @@ type ActiveItem = {
     taskId: string | null;
 }
 
-function loadInitialData(userId: string | null): { projects: Project[]; activeItem: ActiveItem; isLoaded: boolean; } {
+type HistoryEntry = {
+    projects: Project[];
+    activeItem: ActiveItem;
+    selectedTaskIds: string[];
+    label?: string;
+    timestamp: number;
+};
+
+const deepClone = <T,>(obj: T): T => JSON.parse(JSON.stringify(obj));
+const MAX_HISTORY = 50;
+
+function loadInitialData(userId: string | null): { projects: Project[]; activeItem: ActiveItem; isLoaded: boolean; historyPast: HistoryEntry[]; historyFuture: HistoryEntry[] } {
     const anonymousKey = 'projects_anonymous';
     const activeItemAnonymousKey = 'activeItem_anonymous';
+    const historyAnonymousKey = 'history_anonymous';
 
     if (typeof window === 'undefined') {
         const initialItem = { projectId: null, taskId: null };
-        return { projects: [initialUnassignedProject], activeItem: initialItem, isLoaded: false };
+        return { projects: [initialUnassignedProject], activeItem: initialItem, isLoaded: false, historyPast: [], historyFuture: [] };
     }
     
     const projectKey = userId ? `projects_${userId}` : anonymousKey;
     const activeItemKey = userId ? `activeItem_${userId}` : activeItemAnonymousKey;
+    const historyKey = userId ? `history_${userId}` : historyAnonymousKey;
 
     try {
-        const storedProjectsJSON = window.localStorage.getItem(projectKey);
-        const storedActiveItemJSON = window.localStorage.getItem(activeItemKey);
+    const storedProjectsJSON = window.localStorage.getItem(projectKey);
+    const storedActiveItemJSON = window.localStorage.getItem(activeItemKey);
+    const storedHistoryJSON = window.localStorage.getItem(historyKey);
 
         let projects: Project[] = storedProjectsJSON ? JSON.parse(storedProjectsJSON) : [];
         
@@ -110,6 +124,15 @@ function loadInitialData(userId: string | null): { projects: Project[]; activeIt
         });
 
         const activeItem: ActiveItem = storedActiveItemJSON ? JSON.parse(storedActiveItemJSON) : { projectId: null, taskId: null };
+        let historyPast: HistoryEntry[] = [];
+        let historyFuture: HistoryEntry[] = [];
+        if (storedHistoryJSON) {
+            try {
+                const parsed = JSON.parse(storedHistoryJSON);
+                historyPast = Array.isArray(parsed?.past) ? parsed.past : [];
+                historyFuture = Array.isArray(parsed?.future) ? parsed.future : [];
+            } catch {}
+        }
         
         // Validate activeItem
         let finalActiveItem = { ...activeItem };
@@ -128,14 +151,16 @@ function loadInitialData(userId: string | null): { projects: Project[]; activeIt
             }
         }
         
-        return { projects, activeItem: finalActiveItem, isLoaded: true };
+    return { projects, activeItem: finalActiveItem, isLoaded: true, historyPast, historyFuture };
     } catch (error) {
         console.warn('Failed to load folders from localStorage, starting fresh.', error);
         const keyToRemove = userId ? `projects_${userId}` : anonymousKey;
         const activeItemKeyToRemove = userId ? `activeItem_${userId}` : activeItemAnonymousKey;
+    const historyKeyToRemove = userId ? `history_${userId}` : historyAnonymousKey;
         window.localStorage.removeItem(keyToRemove);
         window.localStorage.removeItem(activeItemKeyToRemove);
-        return { projects: [initialUnassignedProject], activeItem: { projectId: null, taskId: null }, isLoaded: true };
+    window.localStorage.removeItem(historyKeyToRemove);
+    return { projects: [initialUnassignedProject], activeItem: { projectId: null, taskId: null }, isLoaded: true, historyPast: [], historyFuture: [] };
     }
 }
 
@@ -146,12 +171,16 @@ export function useProjects() {
         projects: Project[]; 
         activeItem: ActiveItem; 
         selectedTaskIds: string[];
-        isLoaded: boolean; 
+    isLoaded: boolean; 
+    historyPast: HistoryEntry[];
+    historyFuture: HistoryEntry[];
     }>({ 
         projects: [initialUnassignedProject], 
         activeItem: { projectId: null, taskId: null },
         selectedTaskIds: [],
-        isLoaded: false 
+    isLoaded: false,
+    historyPast: [],
+    historyFuture: [],
     });
     const [saveError, setSaveError] = useState<string | null>(null);
     const { toast } = useToast();
@@ -184,15 +213,17 @@ export function useProjects() {
             try {
                 const projectKey = user ? `projects_${user.uid}` : 'projects_anonymous';
                 const activeItemKey = user ? `activeItem_${user.uid}` : 'activeItem_anonymous';
+                const historyKey = user ? `history_${user.uid}` : 'history_anonymous';
                 window.localStorage.setItem(projectKey, JSON.stringify(state.projects));
                 window.localStorage.setItem(activeItemKey, JSON.stringify(state.activeItem));
+                window.localStorage.setItem(historyKey, JSON.stringify({ past: state.historyPast, future: state.historyFuture }));
                 if (saveError) setSaveError(null);
             } catch (error) {
                 console.warn(`Error writing to localStorage:`, error);
                 setSaveError('Your browser may be out of storage space. Changes are not being saved.');
             }
         }
-    }, [state.projects, state.activeItem, state.isLoaded, user, loading, saveError]);
+    }, [state.projects, state.activeItem, state.historyPast, state.historyFuture, state.isLoaded, user, loading, saveError]);
 
     // This effect shows a toast only when a save error occurs
     useEffect(() => {
@@ -209,6 +240,74 @@ export function useProjects() {
         setState(prevState => ({ ...prevState, selectedTaskIds: ids }));
     }, []);
 
+    // History helpers
+    const canUndo = state.historyPast.length > 0;
+    const canRedo = state.historyFuture.length > 0;
+
+    const applyWithHistory = useCallback((label: string, producer: (prev: typeof state) => typeof state) => {
+        setState(prev => {
+            const snapshot: HistoryEntry = {
+                projects: deepClone(prev.projects),
+                activeItem: deepClone(prev.activeItem),
+                selectedTaskIds: deepClone(prev.selectedTaskIds),
+                label,
+                timestamp: Date.now(),
+            };
+            const next = producer(prev);
+            return {
+                ...next,
+                historyPast: [...prev.historyPast, snapshot].slice(-MAX_HISTORY),
+                historyFuture: [],
+            };
+        });
+    }, []);
+
+    const undo = useCallback(() => {
+        setState(prev => {
+            if (prev.historyPast.length === 0) return prev;
+            const past = [...prev.historyPast];
+            const last = past.pop()!;
+            const currentSnapshot: HistoryEntry = {
+                projects: deepClone(prev.projects),
+                activeItem: deepClone(prev.activeItem),
+                selectedTaskIds: deepClone(prev.selectedTaskIds),
+                timestamp: Date.now(),
+                label: 'Redo checkpoint',
+            };
+            return {
+                ...prev,
+                projects: last.projects,
+                activeItem: last.activeItem,
+                selectedTaskIds: last.selectedTaskIds,
+                historyPast: past,
+                historyFuture: [...prev.historyFuture, currentSnapshot].slice(-MAX_HISTORY),
+            };
+        });
+    }, []);
+
+    const redo = useCallback(() => {
+        setState(prev => {
+            if (prev.historyFuture.length === 0) return prev;
+            const future = [...prev.historyFuture];
+            const nextSnap = future.pop()!;
+            const currentSnapshot: HistoryEntry = {
+                projects: deepClone(prev.projects),
+                activeItem: deepClone(prev.activeItem),
+                selectedTaskIds: deepClone(prev.selectedTaskIds),
+                timestamp: Date.now(),
+                label: 'Undo checkpoint',
+            };
+            return {
+                ...prev,
+                projects: nextSnap.projects,
+                activeItem: nextSnap.activeItem,
+                selectedTaskIds: nextSnap.selectedTaskIds,
+                historyPast: [...prev.historyPast, currentSnapshot].slice(-MAX_HISTORY),
+                historyFuture: future,
+            };
+        });
+    }, []);
+
     const createProject = (name: string): string | null => {
         const newProject: Project = {
             id: crypto.randomUUID(),
@@ -220,17 +319,17 @@ export function useProjects() {
             summaries: [],
             pinned: false,
         }
-        setState(prevState => ({
+    applyWithHistory('Create folder', prevState => ({
             ...prevState, 
             projects: [...prevState.projects, newProject]
-        }));
+    }));
         return newProject.id;
     };
     
     const createTaskInProject = (projectId: string, taskName: string): string | null => {
         const newTaskId = crypto.randomUUID();
         let success = false;
-        setState(prevState => {
+    applyWithHistory('Create scope', prevState => {
             const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
             const project = projectsCopy.find((p: Project) => p.id === projectId);
             if (!project) return prevState;
@@ -260,17 +359,17 @@ export function useProjects() {
 
 
     const updateProject = (updatedProject: Project) => {
-        setState(prevState => {
+    applyWithHistory('Update folder', prevState => {
             const newState = {
                 ...prevState,
                 projects: prevState.projects.map(p => p.id === updatedProject.id ? { ...updatedProject, lastEdited: Date.now() } : p)
             }
             return newState;
-        });
+    });
     };
 
     const setTasksForProject = (projectId: string, tasks: Task[]) => {
-        setState(prevState => {
+    applyWithHistory('Set tasks for folder', prevState => {
             const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
             const project = projectsCopy.find((p: Project) => p.id === projectId);
             if (project) {
@@ -278,11 +377,11 @@ export function useProjects() {
                 project.lastEdited = Date.now();
             }
             return { ...prevState, projects: projectsCopy };
-        });
+    });
     };
 
     const addSummaryToProject = (projectId: string, summaryText: string) => {
-        setState(prevState => {
+    applyWithHistory('Add project summary', prevState => {
             const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
             const project = projectsCopy.find((p: Project) => p.id === projectId);
             if (!project) return prevState;
@@ -300,7 +399,7 @@ export function useProjects() {
     };
 
     const addSummaryToTask = (projectId: string, taskId: string, summaryText: string) => {
-        setState(prevState => {
+    applyWithHistory('Add task summary', prevState => {
             const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
             const project = projectsCopy.find((p: Project) => p.id === projectId);
             if (!project) return prevState;
@@ -326,7 +425,7 @@ export function useProjects() {
         }
         
         let wasDeleted = false;
-        setState(prevState => {
+    applyWithHistory('Delete folder', prevState => {
             const updatedProjects = prevState.projects.filter((p: Project) => p.id !== projectId);
             
             if (updatedProjects.length < prevState.projects.length) {
@@ -342,13 +441,13 @@ export function useProjects() {
                 };
             }
             return prevState;
-        });
+    });
         return wasDeleted;
     };
     
     const deleteTask = (projectId: string, taskId: string): boolean => {
          let wasDeleted = false;
-         setState(prevState => {
+         applyWithHistory('Delete scope', prevState => {
             const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
             const project = projectsCopy.find((p: Project) => p.id === projectId);
             if (!project) return prevState;
@@ -392,13 +491,13 @@ export function useProjects() {
                 };
             }
             return prevState;
-        });
+    });
         return wasDeleted;
     };
     
     const deleteSelectedTasks = (projectId: string, taskIds: string[]): boolean => {
         let deletedCount = 0;
-        setState(prevState => {
+    applyWithHistory('Delete selected scopes', prevState => {
             const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
             const project = projectsCopy.find((p: Project) => p.id === projectId);
             if (!project) return prevState;
@@ -433,7 +532,7 @@ export function useProjects() {
             }
 
             return prevState;
-        });
+    });
         return deletedCount > 0;
     };
 
@@ -442,7 +541,7 @@ export function useProjects() {
         if (sourceProjectId === targetProjectId) return false;
         
         let moved = false;
-        setState(prevState => {
+    applyWithHistory('Move scope to folder', prevState => {
             const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
             const sourceProject = projectsCopy.find((p: Project) => p.id === sourceProjectId);
             const targetProject = projectsCopy.find((p: Project) => p.id === targetProjectId);
@@ -488,13 +587,13 @@ export function useProjects() {
                 return { ...prevState, projects: projectsCopy, activeItem: newActiveItem };
             }
             return prevState;
-        });
+    });
         return moved;
     };
     
     const promoteSubtaskToTask = (projectId: string, subtaskId: string): boolean => {
         let promoted = false;
-        setState(prevState => {
+    applyWithHistory('Promote sub-scope to top level', prevState => {
             const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
             const project = projectsCopy.find((p:Project) => p.id === projectId);
             if (!project) return prevState;
@@ -533,13 +632,13 @@ export function useProjects() {
             }
             
             return prevState;
-        });
+    });
         return promoted;
     }
 
     const addSubtask = (projectId: string, anchorTaskId: string, newSubtasks: Task[], isSibling: boolean): boolean => {
         let taskAdded = false;
-        setState(prevState => {
+    applyWithHistory('Add sub-scope(s)', prevState => {
             const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
             const project = projectsCopy.find((p: Project) => p.id === projectId);
             if (!project) return prevState;
@@ -575,12 +674,12 @@ export function useProjects() {
             }
     
             return prevState;
-        });
+    });
         return taskAdded;
     };
 
     const updateTaskAndPropagateStatus = (projectId: string, updatedTask: Task) => {
-        setState(prevState => {
+    applyWithHistory('Update scope', prevState => {
             const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
             const project = projectsCopy.find((p: Project) => p.id === projectId);
             if (!project) return prevState;
@@ -613,7 +712,7 @@ export function useProjects() {
             }
 
             return prevState;
-        });
+    });
     };
     
     // Helper function to recursively update parent statuses
@@ -795,7 +894,7 @@ export function useProjects() {
         });
 
         if (result.success && result.result) {
-            setState(prevState => {
+            applyWithHistory('Add execution result', prevState => {
                 const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
                 const proj = projectsCopy.find((p: Project) => p.id === projectId);
                 if (!proj) return prevState;
@@ -820,27 +919,6 @@ export function useProjects() {
         }
     };
     
-    const regenerateTask = async (projectId: string, taskId: string, originalTask: string, userInput?: string) => {
-        toast({ title: 'AI is regenerating the scope...' });
-        const result = await handleRegenerateTask({ originalTask, userInput });
-        if (result.success && result.newTask) {
-            setState(prevState => {
-                const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
-                const project = projectsCopy.find((p: Project) => p.id === projectId);
-                if (!project) return prevState;
-                const task = findTaskRecursive(project.tasks, taskId);
-                if (task) {
-                    task.text = result.newTask;
-                    task.lastEdited = Date.now();
-                }
-                return { ...prevState, projects: projectsCopy };
-            });
-            toast({ title: 'Scope regenerated!', variant: 'default' });
-        } else {
-            toast({ title: 'Regeneration Failed', description: result.error, variant: 'destructive' });
-        }
-    };
-
 
     return {
         projects: state.projects,
@@ -848,6 +926,8 @@ export function useProjects() {
         activeTaskId: state.activeItem.taskId,
         selectedTaskIds: state.selectedTaskIds,
         isLoaded: state.isLoaded,
+    historyPast: state.historyPast,
+    historyFuture: state.historyFuture,
         setActiveItem,
         setSelectedTaskIds,
         createProject,
@@ -866,9 +946,12 @@ export function useProjects() {
         addCommentToTask,
         addReplyToComment,
         updateComment,
-        deleteComment,
-        executeTask,
-        regenerateTask
+    deleteComment,
+    executeTask,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
     };
 }
 

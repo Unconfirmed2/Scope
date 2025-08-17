@@ -4,11 +4,11 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type { Task, SortOption, Project } from '@/lib/types';
 // Persona feature removed
-import { handleGenerateTasks, handleGenerateProjectSummary, handleRephraseGoal } from './actions';
+import { handleGenerateTasks, handleGenerateProjectSummary, handleRephraseGoal, handleGenerateAlternativeScope, handlePreviewChange } from './actions';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, ArrowUpDown, Pencil, ChevronRight, MessageSquare, BrainCircuit, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, Folder, File, Zap as ZapIcon, Bot, List, Map, Columns, LogOut, User, ImagePlus } from 'lucide-react';
+import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, ArrowUpDown, Pencil, ChevronRight, MessageSquare, BrainCircuit, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, Folder, File, Zap as ZapIcon, Bot, List, Map as MapIcon, Columns, LogOut, User, ImagePlus, RotateCw, RotateCcw, History } from 'lucide-react';
 import { Sidebar } from '@/components/sidebar';
 import { TreeViewWrapper as TreeView } from '@/components/tree-view';
 import { KanbanView } from '@/components/kanban-view';
@@ -23,7 +23,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { useProjects } from '@/hooks/use-projects';
-import { findTaskPath, countCommentsRecursively, sortProjects } from '@/lib/utils';
+import { findTaskPath, countCommentsRecursively, sortProjects, scanDependencies } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -64,28 +64,14 @@ const prettyPrintJson = (data: any): string => {
     }
 };
 
-// Convert arbitrary raw JSON into Task[]
+// Convert arbitrary raw JSON into Task[] (preserve keys exactly; no humanization)
 const convertRawToTasks = (raw: any, parentId: string | null): Task[] => {
-    const humanizeKey = (key: string, value?: any): string => {
-        if (!key) return '';
-        let s = String(key)
-            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-            .replace(/[\-_]+/g, ' ')
-            .replace(/\s+/g, ' ')
-            .trim()
-            .toLowerCase();
-        if (typeof value === 'number' && !Number.isNaN(value)) {
-            if (value !== 1) {
-                const parts = s.split(' ');
-                const last = parts[parts.length - 1];
-                if (last && !/s$/.test(last)) {
-                    parts[parts.length - 1] = last + 's';
-                    s = parts.join(' ');
-                }
-            }
+    const unwrapSingleRoot = (v: any) => {
+        if (v && typeof v === 'object' && !Array.isArray(v)) {
+            const keys = Object.keys(v);
+            if (keys.length === 1) return (v as any)[keys[0]];
         }
-        // Capitalize first letter
-        return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+        return v;
     };
 
     const makeTask = (text: string, index: number, currentParentId: string | null, description = '', children: Task[] = []): Task => ({
@@ -117,13 +103,13 @@ const convertRawToTasks = (raw: any, parentId: string | null): Task[] => {
                     typeof val === 'number' ||
                     typeof val === 'boolean'
                 ) {
-            // Primitive: render inline in text e.g., "timing: Serve 15-20 minutes before main"
-            const inline = `${humanizeKey(String(k), val)}: ${String(val)}`;
+            // Primitive: render inline in text e.g., "Timing: Serve 15-20 minutes before main"
+            const inline = `${String(k)}: ${String(val)}`;
             return makeTask(inline, idx, currentParentId, '', []);
                 }
                 // Non-primitive: children derived recursively
                 const children = fromAny(val, null);
-                return makeTask(humanizeKey(String(k)), idx, currentParentId, '', children);
+                return makeTask(String(k), idx, currentParentId, '', children);
             });
         }
         // Primitive
@@ -131,7 +117,7 @@ const convertRawToTasks = (raw: any, parentId: string | null): Task[] => {
     };
 
     // Assign order indices at the top level
-    const top = fromAny(raw, parentId);
+    const top = fromAny(unwrapSingleRoot(raw), parentId);
     return top.map((t, i) => ({ ...t, order: i, parentId }));
 };
 
@@ -140,7 +126,7 @@ export default function Home() {
     const { user, loading: authLoading, logOut } = useAuth();
 
   const { toast } = useToast();
-  const { 
+    const { 
     projects, 
     activeProjectId,
     activeTaskId,
@@ -165,8 +151,13 @@ export default function Home() {
     updateComment,
     deleteComment,
     executeTask,
-    regenerateTask,
-    isLoaded
+    isLoaded,
+    undo,
+    redo,
+    canUndo,
+        canRedo,
+        historyPast,
+        historyFuture
   } = useProjects();
   
   const [isGenerating, setIsGenerating] = useState(false);
@@ -186,10 +177,15 @@ export default function Home() {
   const [executingTask, setExecutingTask] = useState<Task | null>(null);
   const [executionInput, setExecutionInput] = useState('');
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [recentlyChanged, setRecentlyChanged] = useState<Record<string, { kind: 'new' | 'updated'; at: number }>>({});
   
     const [aiConfirmationResponse, setAiConfirmationResponse] = useState<GenerateTaskStepsOutput | null>(null);
+    // Alternative flow response + summary dialog
+    const [altChangesSummary, setAltChangesSummary] = useState<{ replacedTitle: string; updatedTargets: string[]; notes?: string[] } | null>(null);
+    const [isAltSummaryDialogOpen, setIsAltSummaryDialogOpen] = useState(false);
     const [isConfirmationDialogOpen, setIsConfirmationDialogOpen] = useState(false);
     const [refinedGoal, setRefinedGoal] = useState<string | null>(null);
   const [confirmationInput, setConfirmationInput] = useState('');
@@ -197,6 +193,9 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
     // Persona feature removed
     const isRefineMode = useMemo(() => Boolean(confirmationInput.trim() || confirmationImage), [confirmationInput, confirmationImage]);
+    // Unified confirmation dialog mode
+    const [confirmationMode, setConfirmationMode] = useState<{ type: 'initial' | 'subscope' | 'regenerate' | 'alternative'; targetTaskId?: string }>({ type: 'initial' });
+    const [aiPreview, setAiPreview] = useState<string>('');
 
   
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>,
@@ -251,6 +250,29 @@ export default function Home() {
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [handleMouseMove, handleMouseUp]);
+
+    // Global keyboard shortcuts for undo/redo
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            const isMac = navigator.platform.toUpperCase().includes('MAC');
+            const mod = isMac ? e.metaKey : e.ctrlKey;
+            if (mod && !e.shiftKey && e.key.toLowerCase() === 'z') {
+                e.preventDefault();
+                if (canUndo) {
+                    undo();
+                    toast({ title: 'Undid last change' });
+                }
+            } else if ((mod && e.shiftKey && e.key.toLowerCase() === 'z') || (mod && e.key.toLowerCase() === 'y')) {
+                e.preventDefault();
+                if (canRedo) {
+                    redo();
+                    toast({ title: 'Redid change' });
+                }
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [undo, redo, canUndo, canRedo, toast]);
 
 
   const sortedProjects = useMemo(() => {
@@ -315,9 +337,10 @@ export default function Home() {
             toast({ variant: 'destructive', title: 'Rephrase Failed', description: result.error || 'The AI could not rephrase the scope.' });
             return;
         }
-        setRefinedGoal(result.data.goal);
-        setAiConfirmationResponse({ raw: result.data.goal });
-        setIsConfirmationDialogOpen(true);
+    setRefinedGoal(result.data.goal);
+    setAiConfirmationResponse({ raw: result.data.goal });
+    setIsConfirmationDialogOpen(true);
+    setConfirmationMode({ type: 'initial' });
 
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred during generation.';
@@ -326,6 +349,15 @@ export default function Home() {
         setIsGenerating(false);
     }
   };
+
+    // Helper to fetch and set AI preview when dialog opens for certain modes
+    const fetchPreviewIfNeeded = useCallback(async (mode: 'alternative' | 'subscope' | 'regenerate', selectedText: string) => {
+        const projectName = activeProject?.name;
+        const parentPathTitles = breadcrumbPath.slice(0, -1).map(t => t.text);
+        const res = await handlePreviewChange({ type: mode, selectedText, parentPathTitles, projectName });
+        if (res.success && res.data) setAiPreview(res.data.preview);
+        else setAiPreview('');
+    }, [activeProject?.name, breadcrumbPath]);
 
   const handleAcceptConfirmation = async () => {
     if (!isLoaded) return;
@@ -339,7 +371,7 @@ export default function Home() {
     }
   
     setIsGenerating(true);
-    setIsConfirmationDialogOpen(false);
+    // Keep dialog open during some flows to allow follow-ups; we will close it explicitly per-branch
   
     try {
             const isUnassigned = targetProject.id === 'unassigned';
@@ -370,59 +402,267 @@ export default function Home() {
                 return; // Stop here; user can iterate further
             }
 
-            // No feedback: now generate tasks from the final refined goal
-            const finalGoal = refinedGoal || goal;
-            toast({ title: 'Generating scopes...' });
-            const gen = await handleGenerateTasks({
-                goal: finalGoal,
-                projectName: isUnassigned ? undefined : targetProject.name,
-                existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
-                photoDataUri: goalImage?.dataUri,
-            });
-            if (!gen.success || !gen.data) {
-                toast({ variant: 'destructive', title: 'AI Generation Failed', description: gen.error || 'The AI did not return a valid structure.' });
-                setIsGenerating(false);
-                return;
+            // No feedback: now generate based on mode
+            if (confirmationMode.type === 'initial') {
+                const finalGoal = refinedGoal || goal;
+                toast({ title: 'Generating scopes...' });
+                const gen = await handleGenerateTasks({
+                    goal: finalGoal,
+                    projectName: isUnassigned ? undefined : targetProject.name,
+                    existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
+                    photoDataUri: goalImage?.dataUri,
+                });
+                if (!gen.success || !gen.data) {
+                    toast({ variant: 'destructive', title: 'AI Generation Failed', description: gen.error || 'The AI did not return a valid structure.' });
+                    setIsGenerating(false);
+                    return;
+                }
+                const generatedTasks = convertRawToTasks(gen.data.raw, null);
+                if (generatedTasks.length === 0) {
+                    toast({ variant: 'destructive', title: 'AI Generation Failed', description: 'The AI returned an empty or invalid structure.' });
+                    setIsGenerating(false);
+                    return;
+                }
+                const highestOrder = Math.max(-1, ...targetProject.tasks.map(t => t.order));
+                const newParentTask: Task = {
+                    id: crypto.randomUUID(),
+                    text: finalGoal,
+                    description: '',
+                    completed: false,
+                    status: 'todo',
+                    subtasks: generatedTasks,
+                    lastEdited: Date.now(),
+                    order: highestOrder + 1,
+                    parentId: null,
+                    comments: [],
+                    executionResults: [],
+                    summaries: [],
+                    source: 'ai'
+                };
+                generatedTasks.forEach(task => task.parentId = newParentTask.id);
+                updateProject({ ...targetProject, tasks: [...targetProject.tasks, newParentTask] });
+                toast({ title: `Scopes generated for "${finalGoal}"` });
+                setActiveItem({ projectId: targetProjectId, taskId: newParentTask.id });
+                setActiveTab('list');
+                setIsConfirmationDialogOpen(false);
+            } else if (confirmationMode.type === 'alternative') {
+                const parentId = confirmationMode.targetTaskId;
+                const path = parentId ? findTaskPath(targetProject.tasks, parentId) : null;
+                const parentTask = path && path.length ? path[path.length - 1] : null;
+                if (!parentTask) {
+                    toast({ variant: 'destructive', title: 'Scope not found', description: 'Could not locate the target scope.' });
+                    setIsGenerating(false);
+                    return;
+                }
+                // Build dependency candidates via lightweight scan
+                const depCandidates = scanDependencies(targetProject.tasks, parentTask.text);
+                const parentBreadcrumb = findTaskPath(targetProject.tasks, parentTask.id).map(t => t.text).slice(0, -1);
+                const siblingTitles = (() => {
+                    if (!parentTask.parentId) return targetProject.tasks.filter(t => t.id !== parentTask.id).map(t => t.text);
+                    const parentPath = findTaskPath(targetProject.tasks, parentTask.parentId);
+                    const maybeParent = parentPath.length ? parentPath[parentPath.length - 1] : null;
+                    return (maybeParent?.subtasks || []).filter(t => t.id !== parentTask.id).map(t => t.text);
+                })();
+
+                // Minimal project JSON for context
+                type MinimalNode = { id: string; text: string; description?: string; children: MinimalNode[] };
+                const toMinimal = (tasks: Task[]): MinimalNode[] => tasks.map(t => ({ id: t.id, text: t.text, description: t.description, children: t.subtasks ? toMinimal(t.subtasks) : [] }));
+                const minimalProject = { name: targetProject.name, tasks: toMinimal(targetProject.tasks) };
+
+                toast({ title: 'Creating alternative and assessing related updates...' });
+                const alt = await handleGenerateAlternativeScope({
+                    selectedNode: { id: parentTask.id, text: parentTask.text, description: parentTask.description, subtasks: parentTask.subtasks?.map(st => ({ text: st.text, description: st.description, subtasks: st.subtasks?.length ? [{}] : undefined })) },
+                    parentPathTitles: parentBreadcrumb,
+                    siblingTitles,
+                    inferredType: 'Scope',
+                    dependencyCandidates: depCandidates,
+                    projectName: targetProject.name,
+                    fullProjectJson: depCandidates.length > 0 ? minimalProject : undefined,
+                    trimmedContext: depCandidates.length === 0 ? { siblingTitles, parentPathTitles: parentBreadcrumb } : undefined,
+                });
+
+                if (!alt.success || !alt.data) {
+                    toast({ variant: 'destructive', title: 'AI Failed', description: alt.error || 'Could not create an alternative.' });
+                    setIsGenerating(false);
+                    return;
+                }
+
+                const altData = alt.data;
+                // Helper to parse a one-root outline into a node replacement (preserve id, parent, order)
+                const parseOutlineToNode = (outline: any, existing: Task): Task => {
+                    const keys = outline && typeof outline === 'object' && !Array.isArray(outline) ? Object.keys(outline) : [];
+                    if (keys.length !== 1) {
+                        // Fallback: if invalid, just update title text distinctly
+                        return { ...existing, text: typeof outline === 'string' ? outline : existing.text + ' (Alternative)', lastEdited: Date.now(), source: 'ai' };
+                    }
+                    const rootTitle = keys[0];
+                    const rootVal = outline[rootTitle];
+                    const makeChildren = (val: any): Task[] => {
+                        if (!val) return [];
+                        if (Array.isArray(val)) {
+                            return val.flatMap(v => makeChildren(v));
+                        }
+                        if (typeof val === 'object') {
+                            return Object.entries(val).map(([k, v], idx) => ({
+                                id: crypto.randomUUID(),
+                                text: String(k),
+                                description: '',
+                                completed: false,
+                                status: 'todo',
+                                subtasks: makeChildren(v),
+                                lastEdited: Date.now(),
+                                order: idx,
+                                parentId: existing.id,
+                                comments: [],
+                                executionResults: [],
+                                summaries: [],
+                                source: 'ai'
+                            }));
+                        }
+                        return [{
+                            id: crypto.randomUUID(),
+                            text: String(val),
+                            description: '',
+                            completed: false,
+                            status: 'todo',
+                            subtasks: [],
+                            lastEdited: Date.now(),
+                            order: 0,
+                            parentId: existing.id,
+                            comments: [],
+                            executionResults: [],
+                            summaries: [],
+                            source: 'ai'
+                        }];
+                    };
+                    const newChildren = makeChildren(rootVal);
+                    // Preserve existing id and parent/order; replace text and children
+                    return {
+                        ...existing,
+                        text: String(rootTitle),
+                        description: existing.description || '',
+                        subtasks: newChildren,
+                        lastEdited: Date.now(),
+                        source: 'ai'
+                    };
+                };
+
+                // Apply replacement and patches
+                const draftTasks = [...targetProject.tasks];
+                const pathForUpdate = findTaskPath(draftTasks, parentTask.id);
+                if (!pathForUpdate.length) {
+                    toast({ variant: 'destructive', title: 'Update Failed', description: 'Could not locate the target during apply.' });
+                    setIsGenerating(false);
+                    return;
+                }
+                const targetNode = pathForUpdate[pathForUpdate.length - 1];
+                const replaced = parseOutlineToNode(altData.NewTaskOutline, targetNode);
+                // Replace fields on the existing target node
+                targetNode.text = replaced.text;
+                targetNode.description = replaced.description;
+                targetNode.subtasks = replaced.subtasks;
+                targetNode.lastEdited = Date.now();
+
+                // Apply targeted patches
+                const applyPatch = (node: Task, path: string, value: any) => {
+                    if (path === '/text') node.text = String(value);
+                    if (path === '/description') node.description = String(value || '');
+                    node.lastEdited = Date.now();
+                };
+                const idToNode: Map<string, Task> = new Map();
+                const stack: Task[] = draftTasks.slice();
+                while (stack.length) {
+                    const n = stack.pop()!;
+                    idToNode.set(n.id, n);
+                    if (n.subtasks && n.subtasks.length) stack.push(...n.subtasks);
+                }
+                const updatedIds = new Set<string>();
+                for (const u of altData.Updates || []) {
+                    const target = idToNode.get(u['Target Id']);
+                    if (!target) continue;
+                    for (const ch of u.Changes || []) {
+                        if (ch.Path === '/text' || ch.Path === '/description') {
+                            applyPatch(target, ch.Path, ch.Value);
+                            updatedIds.add(target.id);
+                        }
+                    }
+                }
+
+                updateProject({ ...targetProject, tasks: draftTasks });
+                updateTaskAndPropagateStatus(targetProject.id, targetNode);
+
+                // Mark indicators
+                const now = Date.now();
+                setRecentlyChanged(rc => ({
+                    ...rc,
+                    [targetNode.id]: { kind: 'updated', at: now },
+                    ...Array.from(updatedIds).reduce((acc, id) => {
+                        acc[id] = { kind: 'updated', at: now };
+                        return acc;
+                    }, {} as Record<string, { kind: 'new' | 'updated'; at: number }>)
+                }));
+
+                // Show summary dialog
+                setAltChangesSummary({
+                    replacedTitle: replaced.text,
+                    updatedTargets: Array.from(updatedIds),
+                    notes: (altData['Changes Summary']?.Notes as string[] | undefined) || undefined,
+                });
+                setIsAltSummaryDialogOpen(true);
+                setIsConfirmationDialogOpen(false);
+            } else {
+                // subscope or regenerate
+                const parentId = confirmationMode.targetTaskId;
+                const path = parentId ? findTaskPath(targetProject.tasks, parentId) : null;
+                const parentTask = path && path.length ? path[path.length - 1] : null;
+                if (!parentTask) {
+                    toast({ variant: 'destructive', title: 'Parent scope not found', description: 'Could not locate the target scope.' });
+                    setIsGenerating(false);
+                    return;
+                }
+                const finalParentText = refinedGoal || parentTask.text;
+                toast({ title: confirmationMode.type === 'regenerate' ? 'Regenerating sub-scopes...' : 'Generating sub-scopes...' });
+                const existingSubtaskNames = (parentTask.subtasks || []).map(t => t.text);
+                const imageContext = (confirmationImage ? (confirmationImage as any).dataUri : undefined) ?? (goalImage ? (goalImage as any).dataUri : undefined);
+                const gen = await handleGenerateTasks({
+                    goal: finalParentText,
+                    projectName: isUnassigned ? undefined : targetProject.name,
+                    existingTasks: isUnassigned ? [] : existingSubtaskNames,
+                    photoDataUri: imageContext,
+                });
+                if (!gen.success || !gen.data) {
+                    toast({ variant: 'destructive', title: 'AI Generation Failed', description: gen.error || 'The AI did not return a valid structure.' });
+                    setIsGenerating(false);
+                    return;
+                }
+                const newSubtasks = convertRawToTasks(gen.data.raw, parentTask.id);
+                if (confirmationMode.type === 'subscope') {
+                    if (addSubtask(targetProject.id, parentTask.id, newSubtasks, false)) {
+                        toast({ title: 'Sub-scopes generated!' });
+                    }
+                } else {
+                    // regenerate: replace children
+                    const newProjectTasks = [...targetProject.tasks];
+                    const updatePath = findTaskPath(newProjectTasks, parentTask.id);
+                    if (updatePath.length > 0) {
+                        const target = updatePath[updatePath.length - 1];
+                        target.subtasks = newSubtasks;
+                        target.lastEdited = Date.now();
+                        updateProject({ ...targetProject, tasks: newProjectTasks });
+                        updateTaskAndPropagateStatus(targetProject.id, target);
+                        toast({ title: 'Sub-scopes regenerated!' });
+                    }
+                }
+                setIsConfirmationDialogOpen(false);
             }
-            const generatedTasks = convertRawToTasks(gen.data.raw, null);
-      
-      if (generatedTasks.length === 0) {
-         toast({ variant: 'destructive', title: 'AI Generation Failed', description: 'The AI returned an empty or invalid structure.' });
-         setIsGenerating(false);
-         return;
-      }
-      
-      const highestOrder = Math.max(-1, ...targetProject.tasks.map(t => t.order));
-      const newParentTask: Task = {
-        id: crypto.randomUUID(),
-    text: finalGoal,
-    description: '',
-        completed: false,
-        status: 'todo',
-        subtasks: generatedTasks,
-        lastEdited: Date.now(),
-        order: highestOrder + 1,
-        parentId: null,
-        comments: [],
-        executionResults: [],
-        summaries: [],
-        source: 'ai'
-      };
 
-      generatedTasks.forEach(task => task.parentId = newParentTask.id);
-
-      updateProject({ ...targetProject, tasks: [...targetProject.tasks, newParentTask] });
-      toast({ title: `Scopes generated for "${goal}"`, variant: 'default' });
-
-      setActiveItem({ projectId: targetProjectId, taskId: newParentTask.id });
-      
-      setActiveTab('list');
     setGoal('');
       setGoalImage(null);
       setConfirmationInput('');
       setConfirmationImage(null);
-    setAiConfirmationResponse(null);
-    setRefinedGoal(null);
+      setAiConfirmationResponse(null);
+      setRefinedGoal(null);
+    setConfirmationMode({ type: 'initial' });
 
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred during generation.';
@@ -772,6 +1012,15 @@ export default function Home() {
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => undo()} disabled={!canUndo} title="Undo (Ctrl+Z)">
+                            <RotateCcw className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => redo()} disabled={!canRedo} title="Redo (Ctrl+Y)">
+                            <RotateCw className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsHistoryOpen(true)} title="History">
+                            <History className="h-4 w-4" />
+                        </Button>
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                                 <Button variant="ghost" className="h-10 w-10 rounded-full p-0">
@@ -975,7 +1224,6 @@ export default function Home() {
                                     }}
                                     onAddCommentClick={handleOpenCommentDialog}
                                     onExecuteClick={handleOpenExecuteDialog}
-                                    onRegenerateTask={regenerateTask}
                                     onDeleteTask={(projectId, taskId) => {
                                       if (deleteTask(projectId, taskId)) {
                                           toast({ title: 'Scope deleted', variant: 'default' });
@@ -983,6 +1231,29 @@ export default function Home() {
                                     }}
                                     sortOption={taskSortOption}
                                     onSetSortOption={setTaskSortOption}
+                                    recentlyChanged={recentlyChanged}
+                                    onOpenSubscopeDialog={(task, isRegen) => {
+                                        // Open unified dialog pre-populated with the selected scope and mode
+                                        setRefinedGoal(task.text);
+                                        setAiConfirmationResponse({ raw: task.text });
+                                        setConfirmationInput('');
+                                        setConfirmationImage(null);
+                                        setConfirmationMode({ type: isRegen ? 'regenerate' : 'subscope', targetTaskId: task.id });
+                                        setAiPreview('');
+                                        fetchPreviewIfNeeded(isRegen ? 'regenerate' : 'subscope', task.text);
+                                        setIsConfirmationDialogOpen(true);
+                                    }}
+                                    onOpenRephraseDialog={(task) => {
+                                        setRefinedGoal(task.text);
+                                        setAiConfirmationResponse({ raw: task.text });
+                                        setConfirmationInput('');
+                                        setConfirmationImage(null);
+                                        // Switch to 'alternative' behavior replacing the node and updating related items
+                                        setConfirmationMode({ type: 'alternative', targetTaskId: task.id });
+                                        setAiPreview('');
+                                        fetchPreviewIfNeeded('alternative', task.text);
+                                        setIsConfirmationDialogOpen(true);
+                                    }}
                                 />
                             </TabsContent>
                             <TabsContent value="mindmap">
@@ -1099,15 +1370,16 @@ export default function Home() {
                             <AccordionContent className="space-y-2">
                                 <p><strong className="font-semibold">Generate Scopes (Case Study Method):</strong> ( <Bot className="inline-block text-primary" /> ) The primary way to use the AI. Describe a goal, and the AI will act as a consultant, breaking it down into a hierarchical plan (L1, L2, L3...) and providing a synthesis.</p>
                                 <p><strong className="font-semibold">Execute:</strong> ( <ZapIcon className="inline-block text-yellow-500" /> ) On any scope, use the "Execute" action to have the AI perform a deep-dive case study on the topic and provide a detailed report. Results appear in the "Execution" view.</p>
-                                <p><strong className="font-semibold">Generate/Regenerate Sub-scopes:</strong> ( <BrainCircuit className="inline-block text-primary" /> ) If you need more detail, you can ask the AI to generate sub-scopes for any existing scope.</p>
-                                <p><strong className="font-semibold">Regenerate Scope:</strong> ( <Pencil className="inline-block text-cyan-500" /> ) Rephrase or refine the text of a scope with AI assistance.</p>
+                                <p><strong className="font-semibold">Rephrase Scope Title:</strong> ( <Pencil className="inline-block text-cyan-500" /> ) Refine the text of a scope without changing its children.</p>
+                                <p><strong className="font-semibold">Generate Sub-scopes:</strong> ( <BrainCircuit className="inline-block text-primary" /> ) Ask AI to add new sub-scopes under a scope (append).</p>
+                                <p><strong className="font-semibold">Regenerate Sub-scopes:</strong> ( <RotateCw className="inline-block text-blue-500" /> ) Replace all existing sub-scopes under a scope with a fresh AI-generated set.</p>
                             </AccordionContent>
                         </AccordionItem>
                         <AccordionItem value="item-4">
                             <AccordionTrigger>Content Views</AccordionTrigger>
                             <AccordionContent className="space-y-2">
                                 <p><strong className="font-semibold">List View:</strong> ( <List className="inline-block" /> ) The primary hierarchical view for managing your scopes.</p>
-                                <p><strong className="font-semibold">Mind Map:</strong> ( <Map className="inline-block" /> ) A visual representation of your scope hierarchy, great for brainstorming and understanding relationships.</p>
+                                <p><strong className="font-semibold">Mind Map:</strong> ( <MapIcon className="inline-block" /> ) A visual representation of your scope hierarchy, great for brainstorming and understanding relationships.</p>
                                 <p><strong className="font-semibold">Kanban View:</strong> ( <Columns className="inline-block" /> ) A board view organizing scopes by their status (To Do, In Progress, Done).</p>
                                 <p><strong className="font-semibold">Execution, Comments, Summary:</strong> These views show AI execution results, user comments, and AI-generated summaries for the selected folder or scope.</p>
                             </AccordionContent>
@@ -1121,6 +1393,50 @@ export default function Home() {
         </Dialog>
         <AuthDialog open={isAuthDialogOpen} onOpenChange={setIsAuthDialogOpen} />
         <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
+        {/* Simple history info modal (list only; undo/redo are buttons in header) */}
+        <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
+            <DialogContent className="max-w-md">
+                <DialogHeader>
+                    <DialogTitle>History</DialogTitle>
+                    <DialogDescription>Use Undo/Redo in the header to revert or reapply changes.</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3">
+                    <div>
+                        <div className="text-xs uppercase text-muted-foreground mb-1">Past (oldest → newest)</div>
+                        <ul className="max-h-48 overflow-auto border rounded p-2 text-sm">
+                            {historyPast.length === 0 ? (
+                                <li className="text-muted-foreground">No history yet</li>
+                            ) : (
+                                historyPast.map((h, i) => (
+                                    <li key={i} className="py-1 border-b last:border-b-0">
+                                        <div className="font-medium">{h.label || 'Change'}</div>
+                                        <div className="text-xs text-muted-foreground">{new Date(h.timestamp).toLocaleString()}</div>
+                                    </li>
+                                ))
+                            )}
+                        </ul>
+                    </div>
+                    <div>
+                        <div className="text-xs uppercase text-muted-foreground mb-1">Future (will redo)</div>
+                        <ul className="max-h-24 overflow-auto border rounded p-2 text-sm">
+                            {historyFuture.length === 0 ? (
+                                <li className="text-muted-foreground">Empty</li>
+                            ) : (
+                                historyFuture.map((h, i) => (
+                                    <li key={i} className="py-1 border-b last:border-b-0">
+                                        <div className="font-medium">{h.label || 'Change'}</div>
+                                        <div className="text-xs text-muted-foreground">{new Date(h.timestamp).toLocaleString()}</div>
+                                    </li>
+                                ))
+                            )}
+                        </ul>
+                    </div>
+                </div>
+                <DialogFooter>
+                    <Button onClick={() => setIsHistoryOpen(false)}>Close</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
         <Dialog open={!!commentingTask} onOpenChange={(isOpen) => !isOpen && handleCloseCommentDialog()}>
             <DialogContent>
                 <DialogHeader>
@@ -1168,12 +1484,27 @@ export default function Home() {
                 <Dialog open={isConfirmationDialogOpen} onOpenChange={setIsConfirmationDialogOpen}>
             <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
                 <DialogHeader>
-                                        <DialogTitle>{isRefineMode ? 'Refine scope' : 'Accept & add scopes'}</DialogTitle>
-                                        <DialogDescription>
-                                                {isRefineMode
-                                                    ? 'Add details or feedback, then click “Refine scope” to iterate. Repeat until you are satisfied.'
-                                                    : 'Review the scope. When you are ready, click “Accept & add scopes” to generate tasks.'}
-                                        </DialogDescription>
+                    <DialogTitle>
+                        {isRefineMode ? 'Refine' : (
+                            confirmationMode.type === 'initial' ? 'Accept & add scopes' :
+                            confirmationMode.type === 'subscope' ? 'Accept & generate sub-scopes' :
+                            confirmationMode.type === 'regenerate' ? 'Accept & regenerate sub-scopes' :
+                            'Accept & replace with alternative'
+                        )}
+                    </DialogTitle>
+                    <DialogDescription>
+                        {isRefineMode
+                            ? 'Add details or feedback, then click “Refine scope” to iterate. Repeat until you are satisfied.'
+                            : (
+                                confirmationMode.type === 'initial'
+                                    ? 'Review the scope. When you are ready, click “Accept & add scopes” to generate tasks.'
+                                    : confirmationMode.type === 'subscope'
+                                        ? 'Review the parent scope and any notes. When ready, click “Accept & generate sub-scopes”.'
+                                        : confirmationMode.type === 'regenerate'
+                                            ? 'Review the parent scope and any notes. When ready, click “Accept & regenerate sub-scopes”.'
+                                            : 'Replace this scope with an alternative and update only truly dependent items.'
+                            )}
+                    </DialogDescription>
                 </DialogHeader>
                 
                                 <ScrollArea className="flex-grow border rounded-md p-4 bg-background/50 space-y-3">
@@ -1181,6 +1512,12 @@ export default function Home() {
                                             <div className="text-xs uppercase text-muted-foreground mb-1">Current scope</div>
                                             {renderConfirmationJson(refinedGoal ?? aiConfirmationResponse?.raw ?? goal)}
                                         </div>
+                                        {confirmationMode.type !== 'initial' && aiPreview && (
+                                            <div className="mt-2">
+                                                <div className="text-xs uppercase text-muted-foreground mb-1">AI preview</div>
+                                                <p className="text-sm">{aiPreview}</p>
+                                            </div>
+                                        )}
                                 </ScrollArea>
                  <div className="space-y-2 mt-4">
                     <Label htmlFor="confirmation-input">Add details or feedback (optional)</Label>
@@ -1229,10 +1566,46 @@ export default function Home() {
                                                             </Button>
                                                         ) : (
                                                             <Button onClick={handleAcceptConfirmation} disabled={isGenerating}>
-                                                                {isGenerating ? <Loader2 className="animate-spin" /> : 'Accept & add scopes'}
+                                                                {isGenerating ? (
+                                                                    <Loader2 className="animate-spin" />
+                                                                ) : confirmationMode.type === 'initial' ? (
+                                                                    'Accept & add scopes'
+                                                                ) : confirmationMode.type === 'subscope' ? (
+                                                                    'Accept & generate sub-scopes'
+                                                                ) : (
+                                                                    'Accept & regenerate sub-scopes'
+                                                                )}
                                                             </Button>
                                                         )}
                                                 </DialogFooter>
+            </DialogContent>
+        </Dialog>
+        {/* Alternative changes summary dialog */}
+        <Dialog open={isAltSummaryDialogOpen} onOpenChange={setIsAltSummaryDialogOpen}>
+            <DialogContent className="max-w-xl">
+                <DialogHeader>
+                    <DialogTitle>Changes applied</DialogTitle>
+                    <DialogDescription>We replaced the scope and updated related items.</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-2 text-sm">
+                    {altChangesSummary && (
+                        <>
+                            <div><span className="font-semibold">New Title:</span> {altChangesSummary.replacedTitle}</div>
+                            <div><span className="font-semibold">Updated Items:</span> {altChangesSummary.updatedTargets.length}</div>
+                            {altChangesSummary.notes && altChangesSummary.notes.length > 0 && (
+                                <div>
+                                    <div className="font-semibold">Notes</div>
+                                    <ul className="list-disc pl-5">
+                                        {altChangesSummary.notes.map((n, i) => (<li key={i}>{n}</li>))}
+                                    </ul>
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
+                <DialogFooter>
+                    <Button onClick={() => setIsAltSummaryDialogOpen(false)}>Close</Button>
+                </DialogFooter>
             </DialogContent>
         </Dialog>
     </div>

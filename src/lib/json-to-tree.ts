@@ -47,10 +47,11 @@ export function parseJSONToTree(data: any, name = 'Root', pointer: string = '/')
 
   const node: TreeNode = {
     id: nodeIdCounter++,
-    text: name,
+    text: String(name),
     children: [],
     expanded: true,
-    displayLabel: toTitleCase(String(name).replace(/^\[(\d+)\]$/, '$1')),
+    // Preserve the exact key casing for objects; for array items keep index label
+    displayLabel: String(name),
     jsonPointer: pointer,
   };
 

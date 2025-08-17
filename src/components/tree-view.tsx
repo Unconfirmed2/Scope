@@ -3,24 +3,17 @@
 import { useState, useCallback, useContext, createContext, useRef, useEffect, useMemo } from 'react';
 import type { Project, Task, AIStep, TaskStatus, SortOption } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { BrainCircuit, Trash2, RotateCw, FolderSymlink, ArrowUpRightSquare, ChevronRight, MoreHorizontal, PlusCircle, MessageSquare, Pencil, Zap, CornerDownRight, ArrowUp, ArrowDown, ImagePlus, ClipboardCopy, CheckSquare, Square, Wand2, FileText, ArrowUpDown } from 'lucide-react';
+import { BrainCircuit, Trash2, RotateCw, FolderSymlink, ChevronRight, MoreHorizontal, PlusCircle, MessageSquare, Pencil, Zap, ArrowUp, ArrowDown, ClipboardCopy, CheckSquare, Square, Wand2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { handleGenerateTasks } from '@/app/actions';
+// import { handleGenerateTasks } from '@/app/actions';
 import { Button } from './ui/button';
 import Linkify from 'linkify-react';
 import { Input } from './ui/input';
-import { Textarea } from './ui/textarea';
+// import { Textarea } from './ui/textarea';
 import { Checkbox } from './ui/checkbox';
-import { countDirectSubtasks, sortTasks, sortTasksShallow, findTaskPath, findTaskRecursive } from '@/lib/utils';
+import { countDirectSubtasks, sortTasksShallow, findTaskRecursive } from '@/lib/utils';
 // Persona feature removed
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-    DialogFooter
-} from '@/components/ui/dialog';
+// Legacy dialog removed; unified dialog lives in page component
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -36,19 +29,13 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Badge } from './ui/badge';
 import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { ChevronsRight, ChevronsLeft } from 'lucide-react';
-import Image from 'next/image';
-import { ScrollArea } from './ui/scroll-area';
+// import Image from 'next/image';
+// import { ScrollArea } from './ui/scroll-area';
 
-const readFileAsDataURL = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-};
+// File reading utility removed with legacy dialog
 
 type TreeViewProps = {
   tasks: Task[]; // Now accepts a list of scopes directly
@@ -63,10 +50,15 @@ type TreeViewProps = {
   onAddSubtask: (projectId: string, parentId: string, subtasks: Task[], isSibling: boolean) => void;
   onAddCommentClick: (task: Task) => void;
   onExecuteClick: (task: Task) => void;
-    onRegenerateTask: (projectId: string, taskId: string, originalTask: string, userInput?: string) => void;
   onDeleteTask: (projectId: string, taskId: string) => void;
   sortOption: SortOption;
   onSetSortOption: (option: SortOption) => void;
+    /** Open the unified confirmation/refine dialog in the page for generating or regenerating sub-scopes. */
+    onOpenSubscopeDialog: (task: Task, isRegeneration: boolean) => void;
+    /** Open the unified confirmation/refine dialog for rephrasing the scope title only. */
+    onOpenRephraseDialog: (task: Task) => void;
+    /** Optional: Row-level change indicators to highlight new/updated items */
+    recentlyChanged?: Record<string, { kind: 'new' | 'updated'; at: number }>;
 };
 
 // Context for managing tree state
@@ -162,9 +154,11 @@ const TaskNode = ({
     onAddSubtask,
     onAddCommentClick,
     onExecuteClick,
-    onRegenerateTask,
-    onGenerateSubtasks,
+    
     sortOption,
+    onOpenSubscopeDialog,
+    onOpenRephraseDialog,
+    recentlyChanged,
 }: { 
     task: Task, 
     level: number,
@@ -177,14 +171,15 @@ const TaskNode = ({
     onAddSubtask: (parentId: string, subtasks: Task[], isSibling: boolean) => void;
     onAddCommentClick: (task: Task) => void;
     onExecuteClick: (task: Task) => void;
-    onRegenerateTask: (projectId: string, taskId: string, originalTask: string, userInput?: string) => void;
-    onGenerateSubtasks: (task: Task, isRegeneration: boolean, userInput?: string, photoDataUri?: string) => void;
     sortOption: SortOption;
+    onOpenSubscopeDialog: (task: Task, isRegeneration: boolean) => void;
+    onOpenRephraseDialog: (task: Task) => void;
+    recentlyChanged?: Record<string, { kind: 'new' | 'updated'; at: number }>;
 }) => {
   const { collapsedNodes, toggleNode } = useTreeState();
-  const [isEditing, setIsEditing] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(task.text);
-  const [isAdding, setIsAdding] = useState<{ open: boolean, type: 'child' | 'sibling' }>({ open: false, type: 'child' });
+    const [isAdding, setIsAdding] = useState<{ open: boolean, type: 'child' | 'sibling' }>({ open: false, type: 'child' });
   const [isDescriptionOpen, setIsDescriptionOpen] = useState(false);
   
   const inputRef = useRef<HTMLInputElement>(null);
@@ -353,7 +348,7 @@ const TaskNode = ({
                     {statusSelector}
                 </div>
 
-                {isEditing ? (
+                                {isEditing ? (
                   <Input
                     ref={inputRef}
                     value={editedText}
@@ -375,14 +370,21 @@ const TaskNode = ({
                     <Linkify as="span" options={{ target: '_blank', className: 'text-primary underline hover:text-primary/80' }}>
                       {task.text}
                     </Linkify>
+                                        {recentlyChanged?.[task.id] && (
+                                            <span className="ml-2 inline-flex items-center">
+                                                <Badge className="h-5 flex items-center" variant={recentlyChanged[task.id].kind === 'new' ? 'default' : 'secondary'}>
+                                                    {recentlyChanged[task.id].kind === 'new' ? 'New' : 'Updated'}
+                                                </Badge>
+                                            </span>
+                                        )}
                   </span>
                 )}
             </div>
           </div>
 
           <div className="absolute right-2 top-0 h-full flex items-center gap-1 opacity-0 transition-opacity group-hover/task:opacity-100 bg-gradient-to-l from-accent/20 via-accent/10 to-transparent pl-8">
-              <Tooltip><TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onGenerateSubtasks(task, false)}>
+                            <Tooltip><TooltipTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onOpenSubscopeDialog(task, false)}>
                   <BrainCircuit className="h-4 w-4 text-primary" />
                 </Button>
               </TooltipTrigger><TooltipContent><p>Generate sub-scopes</p></TooltipContent></Tooltip>
@@ -398,9 +400,13 @@ const TaskNode = ({
                             <PlusCircle className="mr-2 h-4 w-4 text-green-500" />
                             Add sub-scope
                         </DropdownMenuItem>
-                         <DropdownMenuItem onClick={() => onRegenerateTask(project.id, task.id, task.text)}>
-                            <Wand2 className="mr-2 h-4 w-4 text-cyan-500" />
-                            Regenerate scope
+                        <DropdownMenuItem onClick={() => onOpenRephraseDialog(task)}>
+                            <Pencil className="mr-2 h-4 w-4 text-cyan-500" />
+                            Replace with alternative
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => onOpenSubscopeDialog(task, true)}>
+                            <RotateCw className="mr-2 h-4 w-4 text-blue-500" />
+                            Regenerate sub-scopes
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => onExecuteClick(task)}>
                             <Zap className="mr-2 h-4 w-4 text-yellow-500" />
@@ -451,7 +457,7 @@ const TaskNode = ({
         />
       )}
 
-      {!isCollapsed && hasSubtasks && (
+    {!isCollapsed && hasSubtasks && (
         <div className="mt-1">
           {sortedSubtasks.map((subtask) => (
             <TaskNode 
@@ -467,9 +473,10 @@ const TaskNode = ({
               onAddSubtask={onAddSubtask}
               onAddCommentClick={onAddCommentClick}
               onExecuteClick={onExecuteClick}
-              onRegenerateTask={onRegenerateTask}
-              onGenerateSubtasks={onGenerateSubtasks}
               sortOption={sortOption}
+              onOpenSubscopeDialog={onOpenSubscopeDialog}
+              onOpenRephraseDialog={onOpenRephraseDialog}
+          recentlyChanged={recentlyChanged}
             />
           ))}
         </div>
@@ -524,15 +531,11 @@ const TreeStateProvider = ({ children, tasks }: { children: React.ReactNode, tas
     );
 }
 
-export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSelectedTaskIds, onUpdateProject, onUpdateTaskAndPropagate, onMoveTask, onPromoteSubtask, onAddSubtask, onAddCommentClick, onExecuteClick, onRegenerateTask, onDeleteTask, sortOption, onSetSortOption }: TreeViewProps) {
+export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSelectedTaskIds, onUpdateProject, onUpdateTaskAndPropagate, onMoveTask, onPromoteSubtask, onAddSubtask, onAddCommentClick, onExecuteClick, onDeleteTask, sortOption, onSetSortOption, onOpenSubscopeDialog, onOpenRephraseDialog, recentlyChanged }: TreeViewProps) {
     const { toast } = useToast();
     const treeState = useContext(TreeStateContext);
     const lastClickedId = useRef<string | null>(null);
-
-    const [isGenerating, setIsGenerating] = useState<{ open: boolean, type: 'subtasks' | 'task', isRegen: boolean, task: Task | null }>({ open: false, type: 'subtasks', isRegen: false, task: null });
-    const [generationInput, setGenerationInput] = useState('');
-    const [generationImage, setGenerationImage] = useState<{file: File, dataUri: string} | null>(null);
-    // Persona state removed
+    // Legacy generation state removed
 
     const formatTaskToString = useCallback((taskToFormat: Task, level: number): string => {
         const indent = '  '.repeat(level);
@@ -566,105 +569,15 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
         }
     };
 
-    // Convert arbitrary raw JSON into Task[] for sub-scope generation
-    const convertRawToTasks = (raw: any, parentId: string, baseOrder: number): Task[] => {
-        const makeTask = (text: string, index: number, currentParentId: string | null, description = '', children: Task[] = []): Task => ({
-            id: crypto.randomUUID(),
-            text,
-            description,
-            completed: false,
-            status: 'todo',
-            subtasks: children,
-            lastEdited: Date.now(),
-            order: baseOrder + index,
-            parentId: currentParentId,
-            comments: [],
-            executionResults: [],
-            summaries: [],
-            source: 'ai',
-        });
-
-        const fromAny = (value: any, currentParentId: string | null): Task[] => {
-            if (value == null) return [];
-            if (Array.isArray(value)) {
-                return value.flatMap((v, i) => {
-                    const ts = fromAny(v, currentParentId);
-                    // apply index at this depth
-                    return ts.length ? ts.map((t, idx) => ({ ...t, order: baseOrder + i + idx })) : [];
-                });
-            }
-            if (typeof value === 'object') {
-                if ('title' in value || 'name' in value) {
-                    const title = String((value as any).title ?? (value as any).name);
-                    const contentText = Array.isArray((value as any).content) ? (value as any).content.join('\n') : '';
-                    const childrenRaw = (value as any).children ?? (value as any).items ?? null;
-                    const children = childrenRaw ? convertRawToTasks(childrenRaw, null as any, 0) : [];
-                    return [makeTask(title, 0, currentParentId, contentText, children)];
-                }
-                const entries = Object.entries(value);
-                return entries.map(([k, val], idx) => {
-                    const children = convertRawToTasks(val, null as any, 0);
-                    const desc = typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean' ? String(val) : '';
-                    return makeTask(String(k), idx, currentParentId, desc, children);
-                });
-            }
-            return [makeTask(String(value), 0, currentParentId)];
-        };
-
-        // top-level ordering
-        const top = fromAny(raw, parentId);
-        return top.map((t, i) => ({ ...t, order: baseOrder + i, parentId }));
-    };
+    // Legacy inline JSON-to-Task conversion removed; unified dialog handles generation paths.
   
-    const handleGenerateSubtasksCallback = useCallback(async (parentTask: Task, isRegeneration: boolean, userInput?: string, photoDataUri?: string) => {
-        toast({ title: 'AI is thinking...', description: `Generating sub-scopes for "${parentTask.text}"` });
-        
-        const existingSubtaskNames = (parentTask.subtasks || []).map(t => t.text);
-        const isUnassigned = project.id === 'unassigned';
-        const result = await handleGenerateTasks({
-          goal: parentTask.text,
-          userInput,
-          projectName: isUnassigned ? undefined : project.name,
-          existingTasks: isUnassigned ? [] : existingSubtaskNames,
-          photoDataUri: photoDataUri,
-          
-        });
-
-        if (result.success && result.data) {
-            const newSubtasks = convertRawToTasks(result.data.raw, parentTask.id, 0);
-            
-            if (isRegeneration) {
-                // To regenerate, we first need to find the task and replace its subtasks.
-                const newProjectTasks = [...project.tasks];
-                const taskToUpdatePath = findTaskPath(newProjectTasks, parentTask.id);
-                if (taskToUpdatePath.length > 0) {
-                    const target = taskToUpdatePath[taskToUpdatePath.length - 1];
-                    target.subtasks = newSubtasks;
-                    target.lastEdited = Date.now();
-                    onUpdateProject({ ...project, tasks: newProjectTasks });
-                    onUpdateTaskAndPropagate(project.id, target);
-                    toast({ title: 'Sub-scopes regenerated!', variant: 'default' });
-                }
-            } else {
-                 onAddSubtask(project.id, parentTask.id, newSubtasks, false);
-                 toast({ title: 'Sub-scopes generated!', variant: 'default' });
-            }
-        } else {
-           toast({
-            variant: 'destructive',
-            title: 'AI Generation Failed',
-            description: result.error,
-          });
-        }
-    }, [toast, project, onUpdateProject, onUpdateTaskAndPropagate, onAddSubtask]);
+    // Legacy direct AI generation callback removed; unified dialog handles generation.
 
     const handleAddSubtaskCallback = useCallback((anchorTaskId: string, subtasks: Task[], isSibling: boolean) => {
         onAddSubtask(project.id, anchorTaskId, subtasks, isSibling);
     }, [project.id, onAddSubtask]);
     
-    const handleRegenerateTaskCallback = useCallback((projectId: string, taskId: string, originalTask: string, userInput?: string) => {
-        onRegenerateTask(projectId, taskId, originalTask, userInput)
-    }, [onRegenerateTask]);
+    // Legacy regenerate task callback removed
 
     const handleToggleAll = () => {
         if (treeState) {
@@ -794,40 +707,7 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
         onSetSelectedTaskIds([]);
     };
     
-    const closeGenerationDialog = () => {
-        setIsGenerating({ open: false, type: 'subtasks', isRegen: false, task: null });
-        setGenerationInput('');
-        setGenerationImage(null);
-        
-    };
-
-    const handleGenerationSubmit = () => {
-        const taskToActOn = isGenerating.task;
-        if (!taskToActOn) return;
-
-        if (isGenerating.type === 'subtasks') {
-            handleGenerateSubtasksCallback(taskToActOn, isGenerating.isRegen, generationInput, generationImage?.dataUri);
-        } else {
-            handleRegenerateTaskCallback(project.id, taskToActOn.id, taskToActOn.text, generationInput);
-        }
-        closeGenerationDialog();
-    };
-
-    const handleGenerationFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-          try {
-            const dataUri = await readFileAsDataURL(file);
-            setGenerationImage({ file, dataUri });
-          } catch (error) {
-            toast({ variant: 'destructive', title: 'Error reading file', description: 'Could not process the selected file.' });
-          }
-        }
-    };
-
-    const handleOpenGenerationDialog = (type: 'subtasks' | 'task', isRegen: boolean, task: Task) => {
-        setIsGenerating({ open: true, type, isRegen, task });
-    };
+    // Old in-component generation dialog removed in favor of unified dialog from the page component.
 
     return (
         <TooltipProvider>
@@ -897,15 +777,15 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                                                 <Zap className="mr-2 text-yellow-500" />
                                                 Execute
                                             </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={() => handleOpenGenerationDialog('task', false, selectedTasks[0])} disabled={selectedTasks.length !== 1}>
+                                            <DropdownMenuItem onClick={() => onOpenRephraseDialog && onOpenRephraseDialog(selectedTasks[0])} disabled={selectedTasks.length !== 1}>
                                                 <Pencil className="mr-2 text-cyan-500" />
-                                                Regenerate Scope
+                                                Replace with alternative
                                             </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={() => handleOpenGenerationDialog('subtasks', false, selectedTasks[0])} disabled={selectedTasks.length !== 1}>
+                                            <DropdownMenuItem onClick={() => onOpenSubscopeDialog && onOpenSubscopeDialog(selectedTasks[0], false)} disabled={selectedTasks.length !== 1}>
                                                 <BrainCircuit className="mr-2 text-primary" />
                                                 Generate sub-scopes
                                             </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={() => handleOpenGenerationDialog('subtasks', true, selectedTasks[0])} disabled={selectedTasks.length !== 1}>
+                                            <DropdownMenuItem onClick={() => onOpenSubscopeDialog && onOpenSubscopeDialog(selectedTasks[0], true)} disabled={selectedTasks.length !== 1}>
                                                 <RotateCw className="mr-2 text-blue-500" />
                                                 Regenerate sub-scopes
                                             </DropdownMenuItem>
@@ -918,7 +798,7 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                                         <FolderSymlink className="mr-2"/>
                                         Move to
                                     </DropdownMenuSubTrigger>
-                                     <DropdownMenuPortal>
+                                    <DropdownMenuPortal>
                                         <DropdownMenuSubContent>
                                             {allProjects.filter(p => p.id !== project.id).map(p => (
                                                 <DropdownMenuItem key={p.id} onClick={() => handleMoveSelected(p.id)}>
@@ -954,14 +834,10 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                         onAddSubtask={handleAddSubtaskCallback}
                         onAddCommentClick={onAddCommentClick}
                         onExecuteClick={onExecuteClick}
-                        onRegenerateTask={(projectId, taskId, originalTask, ...rest) => {
-                            const task = findTaskRecursive(tasks, taskId);
-                            if (task) {
-                                handleOpenGenerationDialog('task', false, task);
-                            }
-                        }}
-                        onGenerateSubtasks={(...args) => handleOpenGenerationDialog('subtasks', args[1], args[0])}
+                        onOpenSubscopeDialog={onOpenSubscopeDialog}
+                        onOpenRephraseDialog={onOpenRephraseDialog}
                         sortOption={sortOption}
+                        recentlyChanged={recentlyChanged}
                     />
                 ))}
             </div>
@@ -971,56 +847,7 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                     <p className="text-sm">Use the input above to add a new scope.</p>
                 </div>
             )}
-            <Dialog open={isGenerating.open} onOpenChange={(isOpen) => !isOpen && closeGenerationDialog()}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>{isGenerating.isRegen ? 'Regenerate' : 'Generate'} {isGenerating.type === 'task' ? 'scope' : 'sub-scopes'}</DialogTitle>
-                        <DialogDescription>
-                            {isGenerating.task?.text}
-                        </DialogDescription>
-                    </DialogHeader>
-                    {/* Persona selection removed */}
-                    <Textarea 
-                        value={generationInput}
-                        onChange={(e) => setGenerationInput(e.target.value)}
-                        placeholder="Add specific instructions or context for the AI..."
-                        rows={4}
-                    />
-                    <div className="space-y-2">
-                        <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById(`gen-file-${isGenerating.task?.id}`)?.click()}>
-                            <ImagePlus className="mr-2" />
-                            Add Image Context
-                        </Button>
-                        <input
-                            type="file"
-                            id={`gen-file-${isGenerating.task?.id}`}
-                            className="hidden"
-                            accept="image/*"
-                            onChange={handleGenerationFileChange}
-                        />
-                        {generationImage && (
-                            <div className="relative w-24 h-24 rounded-md overflow-hidden border">
-                                <Image src={generationImage.dataUri} alt="Preview" layout="fill" objectFit="cover" />
-                                <Button
-                                    variant="destructive"
-                                    size="icon"
-                                    className="absolute top-1 right-1 h-6 w-6"
-                                    onClick={() => setGenerationImage(null)}
-                                >
-                                    <Trash2 className="h-4 w-4" />
-                                </Button>
-                            </div>
-                        )}
-                    </div>
-
-                    <DialogFooter>
-                        <Button variant="ghost" onClick={closeGenerationDialog}>Cancel</Button>
-                        <Button onClick={handleGenerationSubmit}>
-                        {isGenerating.isRegen ? 'Regenerate' : 'Generate'}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            {/* Legacy generation dialog removed; unified dialog is controlled by the page component. */}
             </div>
         </TooltipProvider>
   );

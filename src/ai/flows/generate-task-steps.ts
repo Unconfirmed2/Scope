@@ -1,9 +1,9 @@
 'use server';
 /**
- * Indentation-first breakdown generator.
- * - Uses the exact system prompt from the screenshot.
- * - Parses the model response by indentation as the source of truth.
- * - Falls back to JSON if a clean object is detected, but no strict schema enforcement.
+ * JSON-first nested outline generator.
+ * - Prompts the model to return a single valid JSON object with exactly one Title Case root key.
+ * - Keys must be human-readable Title Case; underscores forbidden.
+ * - Parses JSON directly when present; gracefully falls back to indentation parsing if JSON is missing.
  */
 
 import { generateContent } from '@/ai/claude';
@@ -194,8 +194,28 @@ function deriveSynthesis(nodes: Node[]): string | undefined {
 // ---------- Main flow ----------
 
 async function generateTaskStepsFlow(input: GenerateTaskStepsInput): Promise<GenerateTaskStepsOutput> {
-    // Exact prompt text as requested (kept verbatim)
-    const systemPrompt = `You are an assistant who is an expert in taking a prompt, executing or analyzing it, and returning the results in a structured logical nested outline formatted in JSON. Go as broad or as deep as needed.`;
+    // Updated system prompt per formatting and depth requirements
+    const systemPrompt = `You are an advanced AI assistant tasked with analyzing and/or executing a wide variety of tasks by breaking the prompt down into its component parts and analyzing and executing them recursively. Think step-by-step. After receiving results, carefully reflect on their quality and determine optimal next steps before proceeding. Use your thinking to plan and iterate based on this new information, and then take the best next action. Analyze and expand children tasks if necessary. Go as broad or as deep as needed. You produce a structured, nested OUTLINE in pure JSON (no prose). There must be exactly one root key.
+
+FORMATTING
+- Use one top-level root key that summarizes the task (e.g., "3 Course Meal For 6").
+- Under the root, each object key is a readable heading.
+- Key Casing: “All keys—including the root—MUST be Title Case (capitalize major words).”
+- No Underscores: “Underscores are forbidden in all keys. Replace with spaces.”
+ - Valid JSON only. Output a single JSON object. Do not include code fences, comments, or trailing commas.
+
+DEPTH RULE
+- Do not stop expanding until leaves are atomic items/factors
+
+COLLAPSING RULE
+- If a parent heading is merely a category/label for exactly one concrete child, MERGE them into one heading:
+    "<category>: <child title>"
+    and lift the child's properties under that merged heading.
+- If a category has two or more concrete children, keep the category as the parent and list children normally.
+
+OUTPUT REQUIREMENTS
+- JSON only. Output must be exactly one JSON object with a single root key. No code fences, no prose.
+- Keys should be human-readable; values may be objects, arrays, or strings.`;
 
     let userPrompt = `Here is the user's request:\n---\nGoal: "${input.goal}"`;
     if (input.userInput) userPrompt += `\nAdditional Instructions: ${input.userInput}`;
@@ -203,11 +223,10 @@ async function generateTaskStepsFlow(input: GenerateTaskStepsInput): Promise<Gen
     userPrompt += `\n---`;
     if (input.projectName) userPrompt += `\n\nThis request is part of a larger folder named "${input.projectName}". Keep this context in mind.`;
     if (input.existingTasks?.length) {
-        userPrompt += `\n\nFor context, here are some other scopes already in this folder:`;
+        userPrompt += `\n\nFor context, here are some other scopes already in this folder (do not repeat or trivially rephrase these; produce complementary, non-overlapping items):`;
         for (const t of input.existingTasks) userPrompt += `\n- ${t}`;
     }
-    // Keep the output flexible; allow either JSON or nested bullets
-    userPrompt += `\n\nReturn JSON. No surrounding explanations.`;
+    userPrompt += `\n\nReturn JSON only. Output must be exactly one JSON object with a single root key. Do not wrap in code fences.`;
 
     const response = await generateContent(userPrompt, systemPrompt, 4000);
     const unfenced = stripCodeFences(response);
@@ -215,9 +234,23 @@ async function generateTaskStepsFlow(input: GenerateTaskStepsInput): Promise<Gen
     // Try JSON first, but don't enforce a schema; convert to indent-like tree for consistency
     const json = tryParseJsonObject(unfenced);
     if (json) {
-        // Return the original JSON as-is, plus a derived tree using the provided utility
+        // Return the original JSON as-is, plus a derived tree using the provided utility.
+        // If the root is a single-key object, use that key as the tree root heading.
+        const escapeToken = (t: string) => t.replace(/~/g, "~0").replace(/\//g, "~1");
         resetTreeIdCounter();
-        const tree = parseJSONToTree(json, 'Root');
+        let tree: TreeNode;
+        if (json && typeof json === 'object' && !Array.isArray(json)) {
+            const keys = Object.keys(json);
+            if (keys.length === 1) {
+                const rootKey = keys[0];
+                const pointer = '/' + escapeToken(rootKey);
+                tree = parseJSONToTree((json as any)[rootKey], rootKey, pointer);
+            } else {
+                tree = parseJSONToTree(json, 'Root');
+            }
+        } else {
+            tree = parseJSONToTree(json, 'Root');
+        }
         return { raw: json, tree };
     }
 

@@ -200,6 +200,27 @@ export function findTaskRecursive(tasks: Task[], taskId: string): Task | null {
     return null;
 }
 
+    // Lightweight dependency scan: find nodes whose text/description mention the given phrase (case-insensitive)
+    export function scanDependencies(tasks: Task[], phrase: string): { id: string; path: string; text?: string; description?: string }[] {
+        const results: { id: string; path: string; text?: string; description?: string }[] = [];
+        const stack: { node: Task; path: string[] }[] = tasks.map(t => ({ node: t, path: [t.text] }));
+        const lower = phrase.trim().toLowerCase();
+        while (stack.length) {
+            const { node, path } = stack.pop()!;
+            const inText = node.text?.toLowerCase().includes(lower);
+            const inDesc = (node.description || '').toLowerCase().includes(lower);
+            if (inText || inDesc) {
+                results.push({ id: node.id, path: path.join(' > '), text: node.text, description: node.description });
+            }
+            if (node.subtasks && node.subtasks.length) {
+                for (const c of node.subtasks) stack.push({ node: c, path: [...path, c.text] });
+            }
+        }
+        // De-duplicate by id
+        const seen = new Set<string>();
+        return results.filter(r => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+    }
+
 function countCommentsInList(comments: Comment[]): number {
     let count = 0;
     for (const comment of comments) {
