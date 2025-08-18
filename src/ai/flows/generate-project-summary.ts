@@ -7,7 +7,7 @@
  * - GenerateProjectSummaryOutput - The return type for the generateProjectSummary function.
  */
 
-import { generateContent } from '@/ai/claude';
+import { generateContentBlocks } from '@/ai/claude';
 import { z } from 'zod';
 
 const GenerateProjectSummaryInputSchema = z.object({
@@ -25,40 +25,38 @@ export type GenerateProjectSummaryOutput = z.infer<typeof GenerateProjectSummary
 
 async function generateProjectSummaryFlow(input: GenerateProjectSummaryInput): Promise<GenerateProjectSummaryOutput> {
   const validated = GenerateProjectSummaryInputSchema.parse(input);
-  const systemPrompt = `You are an expert project manager with excellent judgment, tasked with writing a concise status summary for the given item.
+  const systemPrompt = `<rules>
+You are an expert project manager with excellent judgment, tasked with writing a concise status summary for the given item.
 The summary must be ready to be pasted into an email, using clear, human-readable markdown (use '-' for bullets, not '*').
 
-Your goal is to provide a high-level overview, not a granular list of every single item. Use your discretion.
-
-1.  **Top-Line Summary**: Start with a brief, high-level paragraph summarizing the item's overall status.
-2.  **Key Scope Updates**:
-    - For each major sub-scope, provide a high-level summary. Briefly mention the status of its own sub-scopes within the summary, but do not list them all out.
-    - **Exercise judgment on comments**: Do not include every comment. Only mention a comment if it is 'accepted' and indicates a significant decision or a change in strategy. Minor or inconsequential comments should be ignored.
-    - **Incorporate Execution Results**: If a scope has execution results, summarize the key findings or outcomes. Mention if the execution was successful or what the primary takeaways were. Do not just paste the entire result.
-    - Format this section using '-' for bullet points for each main scope.`;
+<structure>
+1. Top-Line Summary: brief, high-level paragraph summarizing overall status.
+2. Key Scope Updates:
+   - For each major sub-scope, provide a high-level summary. Briefly mention the status of its own sub-scopes within the summary, but do not list them all out.
+   - Exercise judgment on comments: Only include accepted, significant comments.
+   - Incorporate Execution Results: summarize key findings and takeaways.
+</structure>
+</rules>`;
 
   let userPrompt = `Context: You are summarizing an item within the folder named "${validated.contextName}".`;
 
   if (validated.previousSummary) {
-    userPrompt += `\n\nA previous summary has been provided. Your main goal is to report on the *changes* since that last summary.
-Focus your Top-Line Summary and Key Scope Updates on what has changed (e.g., scopes completed, new issues, strategic shifts based on comments, new execution results).
-
-Previous Summary:
----
-${validated.previousSummary}
----`;
+  userPrompt += `\n\n<previous_summary>${validated.previousSummary}</previous_summary>\n<instruction>Focus on changes since the previous summary in both the top-line and key updates.</instruction>`;
   } else {
-    userPrompt += `\n\nThis is the first summary request. Provide a comprehensive but high-level overview of the current status of the item, following the structure outlined above.`;
+  userPrompt += `\n\n<instruction>This is the first summary request. Provide a comprehensive but high-level overview of the current status of the item, following the structure outlined above.</instruction>`;
   }
 
-  userPrompt += `\n\nCurrent Item Details (JSON):
-\`\`\`json
-${JSON.stringify(validated.itemToSummarize, null, 2)}
-\`\`\`
+  userPrompt += `\n\n<item_json_attached>true</item_json_attached>\n<final_instruction>Generate the summary now.</final_instruction>`;
 
-Generate the summary now.`;
-
-  const response = await generateContent(userPrompt, systemPrompt, 2000);
+  const response = await generateContentBlocks({
+    system: [{ text: systemPrompt, cache: true }],
+    user: [
+      { text: userPrompt.replace(/```json[\s\S]*```/, '').trim(), cache: false },
+      { text: JSON.stringify(validated.itemToSummarize, null, 0), cache: true },
+    ],
+    maxTokens: 2000,
+    temperature: 0.2,
+  });
   
   const result: GenerateProjectSummaryOutput = {
     summary: response.trim()

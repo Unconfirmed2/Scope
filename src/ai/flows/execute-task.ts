@@ -7,7 +7,7 @@
  * - ExecuteTaskOutput - The return type for the executeTask function.
  */
 
-import { generateContent } from '@/ai/claude';
+import { generateContentBlocks } from '@/ai/claude';
 import { z } from 'zod';
 
 const ExecuteTaskInputSchema = z.object({
@@ -26,40 +26,43 @@ export type ExecuteTaskOutput = z.infer<typeof ExecuteTaskOutputSchema>;
 async function executeTaskFlow(input: ExecuteTaskInput): Promise<ExecuteTaskOutput> {
   // Validate and normalize input
   const validated = ExecuteTaskInputSchema.parse(input);
-  const systemPrompt = `You are an expert consultant. Your goal is to "execute" a scope by treating it as a detailed consulting case study. You will perform a deep analysis, break down the problem, and then synthesize your findings into a coherent report.
+  const systemPrompt = `<rules>
+You are an expert consultant. Your goal is to "execute" a scope by treating it as a detailed consulting case study. You will perform a deep analysis, break down the problem, and then synthesize your findings into a coherent report.
 
+<guidance>
 If the request is ambiguous, make reasonable assumptions and state them clearly in your report.
+Format: human-readable document (paragraphs, '-' bullets). Avoid '#' headers unless necessary.
+</guidance>
 
-Your response must be a comprehensive case study report. Format it as a human-readable document, not a dense markdown file. Use paragraphs for explanations and simple dashes (-) for bullet points. Avoid using '#' for headers unless absolutely necessary.
+<report_must_include>
+- Overview of interpretation and analytical approach.
+- Breakdown of key elements (L1, L2, L3...).
+- Synthesis with actionable recommendations, key insights, relevant links/resources/code snippets if applicable.
+</report_must_include>
+</rules>`;
 
-Your report must include:
-- An overview of your interpretation of the scope and your analytical approach.
-- A breakdown of the key elements (L1, L2, L3...) of the scope.
-- A synthesis of your findings, including actionable recommendations, key insights, relevant links, resources, or code snippets if applicable.`;
-
-  let userPrompt = `Scope to analyze: "${validated.task}"`;
+  let userPrompt = `<request><scope>${validated.task}</scope>`;
 
   if (validated.userInput) {
-    userPrompt += `\n\nThe user has provided these specific instructions, which you must prioritize:
----
-${validated.userInput}
----`;
+    userPrompt += `\n<user_instructions>${validated.userInput}</user_instructions>`;
   }
 
   if (validated.projectName) {
-    userPrompt += `\n\nThis scope is part of the folder: "${validated.projectName}". Consider this context.`;
+    userPrompt += `\n<project_name>${validated.projectName}</project_name>`;
   }
 
   if (validated.otherTasks && validated.otherTasks.length > 0) {
-    userPrompt += `\n\nOther scopes in this folder include:`;
-    validated.otherTasks.forEach(task => {
-      userPrompt += `\n- ${task}`;
-    });
+    userPrompt += `\n<other_tasks>${validated.otherTasks.map(t=>`<task>${t}</task>`).join('')}</other_tasks>`;
   }
 
-  userPrompt += `\n\nGenerate your full case study report now.`;
+  userPrompt += `\n<final_instruction>Generate your full case study report now.</final_instruction></request>`;
 
-  const response = await generateContent(userPrompt, systemPrompt, 4000);
+  const response = await generateContentBlocks({
+    system: [{ text: systemPrompt, cache: true }],
+    user: [{ text: userPrompt, cache: false }],
+    maxTokens: 4000,
+    temperature: 0.2,
+  });
   
   const result: ExecuteTaskOutput = {
     result: response

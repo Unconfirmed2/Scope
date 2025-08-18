@@ -4,7 +4,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type { Task, SortOption, Project } from '@/lib/types';
 // Persona feature removed
-import { handleGenerateTasks, handleGenerateProjectSummary, handleRephraseGoal, handleGenerateAlternativeScope, handlePreviewChange } from './actions';
+import { handleGenerateTasks, handleGenerateProjectSummary, handleRephraseGoal, handleGenerateAlternativeScope, handleProposeChanges } from './actions';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -188,14 +188,31 @@ export default function Home() {
     const [isAltSummaryDialogOpen, setIsAltSummaryDialogOpen] = useState(false);
     const [isConfirmationDialogOpen, setIsConfirmationDialogOpen] = useState(false);
     const [refinedGoal, setRefinedGoal] = useState<string | null>(null);
+            const [proposal, setProposal] = useState<string | null>(null);
   const [confirmationInput, setConfirmationInput] = useState('');
   const [confirmationImage, setConfirmationImage] = useState<{file: File, dataUri: string} | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
     // Persona feature removed
     const isRefineMode = useMemo(() => Boolean(confirmationInput.trim() || confirmationImage), [confirmationInput, confirmationImage]);
     // Unified confirmation dialog mode
-    const [confirmationMode, setConfirmationMode] = useState<{ type: 'initial' | 'subscope' | 'regenerate' | 'alternative'; targetTaskId?: string }>({ type: 'initial' });
-    const [aiPreview, setAiPreview] = useState<string>('');
+        const [confirmationMode, setConfirmationMode] = useState<{ type: 'initial' | 'subscope' | 'regenerate' | 'alternative'; targetTaskId?: string }>({ type: 'initial' });
+
+    // Keyboard shortcuts: Undo/Redo
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            const isMac = navigator.platform.toUpperCase().includes('MAC');
+            const mod = isMac ? e.metaKey : e.ctrlKey;
+            if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+                e.preventDefault();
+                if (canUndo) undo();
+            } else if ((mod && e.key.toLowerCase() === 'y') || (mod && e.shiftKey && e.key.toLowerCase() === 'z')) {
+                e.preventDefault();
+                if (canRedo) redo();
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => window.removeEventListener('keydown', onKeyDown);
+    }, [undo, redo, canUndo, canRedo]);
 
   
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>,
@@ -250,29 +267,6 @@ export default function Home() {
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [handleMouseMove, handleMouseUp]);
-
-    // Global keyboard shortcuts for undo/redo
-    useEffect(() => {
-        const onKeyDown = (e: KeyboardEvent) => {
-            const isMac = navigator.platform.toUpperCase().includes('MAC');
-            const mod = isMac ? e.metaKey : e.ctrlKey;
-            if (mod && !e.shiftKey && e.key.toLowerCase() === 'z') {
-                e.preventDefault();
-                if (canUndo) {
-                    undo();
-                    toast({ title: 'Undid last change' });
-                }
-            } else if ((mod && e.shiftKey && e.key.toLowerCase() === 'z') || (mod && e.key.toLowerCase() === 'y')) {
-                e.preventDefault();
-                if (canRedo) {
-                    redo();
-                    toast({ title: 'Redid change' });
-                }
-            }
-        };
-        window.addEventListener('keydown', onKeyDown);
-        return () => window.removeEventListener('keydown', onKeyDown);
-    }, [undo, redo, canUndo, canRedo, toast]);
 
 
   const sortedProjects = useMemo(() => {
@@ -350,15 +344,6 @@ export default function Home() {
     }
   };
 
-    // Helper to fetch and set AI preview when dialog opens for certain modes
-    const fetchPreviewIfNeeded = useCallback(async (mode: 'alternative' | 'subscope' | 'regenerate', selectedText: string) => {
-        const projectName = activeProject?.name;
-        const parentPathTitles = breadcrumbPath.slice(0, -1).map(t => t.text);
-        const res = await handlePreviewChange({ type: mode, selectedText, parentPathTitles, projectName });
-        if (res.success && res.data) setAiPreview(res.data.preview);
-        else setAiPreview('');
-    }, [activeProject?.name, breadcrumbPath]);
-
   const handleAcceptConfirmation = async () => {
     if (!isLoaded) return;
   
@@ -397,7 +382,26 @@ export default function Home() {
                 setAiConfirmationResponse({ raw: newGoal });
                 setConfirmationInput('');
                 setConfirmationImage(null);
-                setIsConfirmationDialogOpen(true); // show dialog again
+                                setIsConfirmationDialogOpen(true); // stay open
+                                // Refresh proposal preview for non-initial modes
+                                if (confirmationMode.type !== 'initial' && confirmationMode.targetTaskId) {
+                                    setProposal('');
+                                    const parentPathTitles = findTaskPath(targetProject.tasks, confirmationMode.targetTaskId).map(t => t.text).slice(0, -1);
+                                    const taskPath = findTaskPath(targetProject.tasks, confirmationMode.targetTaskId);
+                                    const node = taskPath.at(-1);
+                                    const siblings = node ? ((node.parentId ? findTaskPath(targetProject.tasks, node.parentId).at(-1)?.subtasks || [] : targetProject.tasks).filter(t => t.id !== node.id).map(t => t.text)) : [];
+                                    const existingChildren = node ? (node.subtasks || []).map(t => t.text) : [];
+                                    const res2 = await handleProposeChanges({
+                                        mode: confirmationMode.type === 'regenerate' ? 'regenerate' : confirmationMode.type === 'subscope' ? 'subscope' : 'alternative',
+                                        targetText: newGoal,
+                                        projectName: targetProject.name,
+                                        parentPathTitles,
+                                        siblingTitles: siblings,
+                                        existingChildren,
+                                        userInput: '',
+                                    });
+                                    if (res2.success && res2.data) setProposal(res2.data); else setProposal(null);
+                                }
                 setIsGenerating(false);
                 return; // Stop here; user can iterate further
             }
@@ -477,8 +481,9 @@ export default function Home() {
                     inferredType: 'Scope',
                     dependencyCandidates: depCandidates,
                     projectName: targetProject.name,
-                    fullProjectJson: depCandidates.length > 0 ? minimalProject : undefined,
-                    trimmedContext: depCandidates.length === 0 ? { siblingTitles, parentPathTitles: parentBreadcrumb } : undefined,
+                    // Always include minimal full JSON so the AI can detect true references across the tree
+                    fullProjectJson: minimalProject,
+                    trimmedContext: undefined,
                 });
 
                 if (!alt.success || !alt.data) {
@@ -547,8 +552,8 @@ export default function Home() {
                     };
                 };
 
-                // Apply replacement and patches
-                const draftTasks = [...targetProject.tasks];
+                // Apply replacement and patches - DEEP COPY to ensure mutations work
+                const draftTasks = JSON.parse(JSON.stringify(targetProject.tasks));
                 const pathForUpdate = findTaskPath(draftTasks, parentTask.id);
                 if (!pathForUpdate.length) {
                     toast({ variant: 'destructive', title: 'Update Failed', description: 'Could not locate the target during apply.' });
@@ -556,12 +561,14 @@ export default function Home() {
                     return;
                 }
                 const targetNode = pathForUpdate[pathForUpdate.length - 1];
-                const replaced = parseOutlineToNode(altData.NewTaskOutline, targetNode);
+                const newOutline = (altData as any)["New Task Outline"] ?? (altData as any).NewTaskOutline;
+                const replaced = parseOutlineToNode(newOutline, targetNode);
                 // Replace fields on the existing target node
                 targetNode.text = replaced.text;
                 targetNode.description = replaced.description;
                 targetNode.subtasks = replaced.subtasks;
                 targetNode.lastEdited = Date.now();
+                targetNode.source = 'ai'; // Mark as AI-generated for consistency
 
                 // Apply targeted patches
                 const applyPatch = (node: Task, path: string, value: any) => {
@@ -639,6 +646,11 @@ export default function Home() {
                 if (confirmationMode.type === 'subscope') {
                     if (addSubtask(targetProject.id, parentTask.id, newSubtasks, false)) {
                         toast({ title: 'Sub-scopes generated!' });
+                        const now = Date.now();
+                        setRecentlyChanged(rc => ({
+                            ...rc,
+                            ...newSubtasks.reduce((acc, t) => { acc[t.id] = { kind: 'new', at: now }; return acc; }, {} as Record<string, { kind: 'new' | 'updated'; at: number }>)
+                        }));
                     }
                 } else {
                     // regenerate: replace children
@@ -651,17 +663,24 @@ export default function Home() {
                         updateProject({ ...targetProject, tasks: newProjectTasks });
                         updateTaskAndPropagateStatus(targetProject.id, target);
                         toast({ title: 'Sub-scopes regenerated!' });
+                        const now = Date.now();
+                        setRecentlyChanged(rc => ({
+                            ...rc,
+                            [target.id]: { kind: 'updated', at: now },
+                            ...newSubtasks.reduce((acc, t) => { acc[t.id] = { kind: 'new', at: now }; return acc; }, {} as Record<string, { kind: 'new' | 'updated'; at: number }>)
+                        }));
                     }
                 }
                 setIsConfirmationDialogOpen(false);
             }
 
-    setGoal('');
+        setGoal('');
       setGoalImage(null);
       setConfirmationInput('');
       setConfirmationImage(null);
       setAiConfirmationResponse(null);
       setRefinedGoal(null);
+            setProposal(null);
     setConfirmationMode({ type: 'initial' });
 
     } catch (error) {
@@ -1232,16 +1251,31 @@ export default function Home() {
                                     sortOption={taskSortOption}
                                     onSetSortOption={setTaskSortOption}
                                     recentlyChanged={recentlyChanged}
-                                    onOpenSubscopeDialog={(task, isRegen) => {
+                                                                                                            onOpenSubscopeDialog={(task, isRegen) => {
                                         // Open unified dialog pre-populated with the selected scope and mode
                                         setRefinedGoal(task.text);
                                         setAiConfirmationResponse({ raw: task.text });
                                         setConfirmationInput('');
                                         setConfirmationImage(null);
                                         setConfirmationMode({ type: isRegen ? 'regenerate' : 'subscope', targetTaskId: task.id });
-                                        setAiPreview('');
-                                        fetchPreviewIfNeeded(isRegen ? 'regenerate' : 'subscope', task.text);
-                                        setIsConfirmationDialogOpen(true);
+                                                                                                                    setProposal(''); // placeholder while loading
+                                                                                                                    setIsConfirmationDialogOpen(true);
+                                                                                                                    // Fetch proposal preview async
+                                                                                                                    (async () => {
+                                                                                    const siblings = (task.parentId ? findTaskPath((activeProject as Project).tasks, task.parentId).at(-1)?.subtasks || [] : (activeProject as Project).tasks).filter(t => t.id !== task.id).map(t => t.text);
+                                                                                    const existingChildren = (task.subtasks || []).map(t => t.text);
+                                                                                    const parentPathTitles = findTaskPath((activeProject as Project).tasks, task.id).map(t => t.text).slice(0, -1);
+                                                                                    const res = await handleProposeChanges({
+                                                                                        mode: isRegen ? 'regenerate' : 'subscope',
+                                                                                        targetText: task.text,
+                                                                                        projectName: activeProject?.name,
+                                                                                        parentPathTitles,
+                                                                                        siblingTitles: siblings,
+                                                                                        existingChildren,
+                                                                                    });
+                                                                                                                        if (res.success && res.data) setProposal(res.data);
+                                                                                                                        else setProposal(null);
+                                                                                })();
                                     }}
                                     onOpenRephraseDialog={(task) => {
                                         setRefinedGoal(task.text);
@@ -1249,10 +1283,24 @@ export default function Home() {
                                         setConfirmationInput('');
                                         setConfirmationImage(null);
                                         // Switch to 'alternative' behavior replacing the node and updating related items
-                                        setConfirmationMode({ type: 'alternative', targetTaskId: task.id });
-                                        setAiPreview('');
-                                        fetchPreviewIfNeeded('alternative', task.text);
-                                        setIsConfirmationDialogOpen(true);
+                                                                                setConfirmationMode({ type: 'alternative', targetTaskId: task.id });
+                                                                                                                    setProposal('');
+                                                                                                                    setIsConfirmationDialogOpen(true);
+                                                                                                                    // Proposal for alternative
+                                                                                                                    (async () => {
+                                                                                    const path = findTaskPath((activeProject as Project).tasks, task.id);
+                                                                                    const parentTitles = path.map(t => t.text).slice(0, -1);
+                                                                                    const siblings = (task.parentId ? findTaskPath((activeProject as Project).tasks, task.parentId).at(-1)?.subtasks || [] : (activeProject as Project).tasks).filter(t => t.id !== task.id).map(t => t.text);
+                                                                                    const res = await handleProposeChanges({
+                                                                                        mode: 'alternative',
+                                                                                        targetText: task.text,
+                                                                                        projectName: activeProject?.name,
+                                                                                        parentPathTitles: parentTitles,
+                                                                                        siblingTitles: siblings,
+                                                                                    });
+                                                                                                                        if (res.success && res.data) setProposal(res.data);
+                                                                                                                        else setProposal(null);
+                                                                                })();
                                     }}
                                 />
                             </TabsContent>
@@ -1481,9 +1529,9 @@ export default function Home() {
                 </DialogFooter>
             </DialogContent>
         </Dialog>
-                <Dialog open={isConfirmationDialogOpen} onOpenChange={setIsConfirmationDialogOpen}>
+            <Dialog open={isConfirmationDialogOpen} onOpenChange={(open) => { setIsConfirmationDialogOpen(open); if (!open) setProposal(null); }}>
             <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
-                <DialogHeader>
+                                <DialogHeader>
                     <DialogTitle>
                         {isRefineMode ? 'Refine' : (
                             confirmationMode.type === 'initial' ? 'Accept & add scopes' :
@@ -1507,18 +1555,22 @@ export default function Home() {
                     </DialogDescription>
                 </DialogHeader>
                 
-                                <ScrollArea className="flex-grow border rounded-md p-4 bg-background/50 space-y-3">
-                                        <div>
-                                            <div className="text-xs uppercase text-muted-foreground mb-1">Current scope</div>
-                                            {renderConfirmationJson(refinedGoal ?? aiConfirmationResponse?.raw ?? goal)}
-                                        </div>
-                                        {confirmationMode.type !== 'initial' && aiPreview && (
-                                            <div className="mt-2">
-                                                <div className="text-xs uppercase text-muted-foreground mb-1">AI preview</div>
-                                                <p className="text-sm">{aiPreview}</p>
-                                            </div>
-                                        )}
-                                </ScrollArea>
+                                                                <ScrollArea className="flex-grow border rounded-md p-4 bg-background/50 space-y-3">
+                                                                                <div>
+                                                                                        <div className="text-xs uppercase text-muted-foreground mb-1">Current scope</div>
+                                                                                        {renderConfirmationJson(refinedGoal ?? aiConfirmationResponse?.raw ?? goal)}
+                                                                                </div>
+                                                                                                                        {confirmationMode.type !== 'initial' && (
+                                                                                                                            <div>
+                                                                                                                                <div className="text-xs uppercase text-muted-foreground mb-1">Proposed changes (preview)</div>
+                                                                                                                                <div className="text-sm whitespace-pre-wrap">
+                                                                                                                                    {proposal === '' && <span className="text-muted-foreground">Preparing preview…</span>}
+                                                                                                                                    {proposal === null && <span className="text-muted-foreground">No preview available.</span>}
+                                                                                                                                    {typeof proposal === 'string' && proposal !== '' && <span>{proposal}</span>}
+                                                                                                                                </div>
+                                                                                                                            </div>
+                                                                                                                        )}
+                                                                </ScrollArea>
                  <div className="space-y-2 mt-4">
                     <Label htmlFor="confirmation-input">Add details or feedback (optional)</Label>
                     <Textarea
@@ -1572,8 +1624,10 @@ export default function Home() {
                                                                     'Accept & add scopes'
                                                                 ) : confirmationMode.type === 'subscope' ? (
                                                                     'Accept & generate sub-scopes'
-                                                                ) : (
+                                                                ) : confirmationMode.type === 'regenerate' ? (
                                                                     'Accept & regenerate sub-scopes'
+                                                                ) : (
+                                                                    'Accept & replace with alternative'
                                                                 )}
                                                             </Button>
                                                         )}

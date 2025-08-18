@@ -776,7 +776,7 @@ export function useProjects() {
         action: (comments: Comment[]) => { found: boolean, updatedComments: Comment[] }
     ): boolean => {
         let actionResult = false;
-        setState(prevState => {
+        applyWithHistory('Update comments', prevState => {
             const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
             const project = projectsCopy.find((p: Project) => p.id === projectId);
             if (!project) return prevState;

@@ -7,8 +7,8 @@ import { generateTaskSteps, type GenerateTaskStepsInput, type GenerateTaskStepsO
 import { z } from 'zod';
 import { rephraseGoal, type RephraseGoalInput, type RephraseGoalOutput } from '@/ai/flows/rephrase-goal';
 import { generateAlternativeScope, type AlternativeScopeInput, type AlternativeScopeOutput } from '@/ai/flows/generate-alternative-scope';
+import { proposeChanges, type ProposeChangesInput } from '@/ai/flows/propose-changes';
 import { type Task, type Project, type CommentStatus, type TaskStatus, type Comment, type ExecutionResult } from '@/lib/types';
-import { previewChange, type PreviewChangeInput, type PreviewChangeOutput } from '@/ai/flows/preview-change';
 
 
 const GenerateTasksInputSchema = z.object({
@@ -190,22 +190,25 @@ export async function handleGenerateAlternativeScope(input: AlternativeInput): P
     }
 }
 
-// --- Preview change (lightweight, sentence only) ---
-const PreviewInputSchema = z.object({
-    type: z.enum(['alternative','subscopes','regenerate']),
-    selectedText: z.string(),
-    parentPathTitles: z.array(z.string()).optional(),
+// --- Proposal (preview-only) ---
+const ProposeChangesSchema = z.object({
+    mode: z.enum(['alternative', 'regenerate', 'subscope']),
+    targetText: z.string(),
     projectName: z.string().optional(),
+    parentPathTitles: z.array(z.string()).optional(),
+    siblingTitles: z.array(z.string()).optional(),
+    existingChildren: z.array(z.string()).optional(),
+    userInput: z.string().optional(),
 });
-type PreviewInput = z.infer<typeof PreviewInputSchema>;
+type ProposalInput = z.infer<typeof ProposeChangesSchema>;
 
-export async function handlePreviewChange(input: PreviewInput): Promise<{ success: boolean; data?: PreviewChangeOutput; error?: string }>{
+export async function handleProposeChanges(input: ProposalInput): Promise<{ success: boolean; data?: string; error?: string }> {
     try {
-        const validated = PreviewInputSchema.parse(input);
-        const result = await previewChange(validated as PreviewChangeInput);
+        const validated = ProposeChangesSchema.parse(input) as ProposeChangesInput;
+        const result = await proposeChanges(validated);
         return { success: true, data: result };
     } catch (error) {
-        console.error('Error in handlePreviewChange:', error);
+        console.error('Error in handleProposeChanges:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unexpected response was received from the server.';
         return { success: false, error: errorMessage };
     }

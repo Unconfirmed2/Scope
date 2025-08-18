@@ -6,7 +6,7 @@
  * - Parses JSON directly when present; gracefully falls back to indentation parsing if JSON is missing.
  */
 
-import { generateContent } from '@/ai/claude';
+import { generateContentBlocks } from '@/ai/claude';
 import { parseJSONToTree, resetTreeIdCounter, type TreeNode } from '@/lib/json-to-tree';
 
 // Minimal types re-exported for UI compatibility (not enforced at runtime)
@@ -195,40 +195,47 @@ function deriveSynthesis(nodes: Node[]): string | undefined {
 
 async function generateTaskStepsFlow(input: GenerateTaskStepsInput): Promise<GenerateTaskStepsOutput> {
     // Updated system prompt per formatting and depth requirements
-    const systemPrompt = `You are an advanced AI assistant tasked with analyzing and/or executing a wide variety of tasks by breaking the prompt down into its component parts and analyzing and executing them recursively. Think step-by-step. After receiving results, carefully reflect on their quality and determine optimal next steps before proceeding. Use your thinking to plan and iterate based on this new information, and then take the best next action. Analyze and expand children tasks if necessary. Go as broad or as deep as needed. You produce a structured, nested OUTLINE in pure JSON (no prose). There must be exactly one root key.
+    const systemPrompt = `<rules>
+You are an advanced AI assistant tasked with analyzing and/or executing a wide variety of tasks by breaking the prompt down into its component parts and analyzing and executing them recursively. Think step-by-step. After receiving results, carefully reflect on their quality and determine optimal next steps before proceeding. Use your thinking to plan and iterate based on this new information, and then take the best next action. Analyze and expand children tasks if necessary. Go as broad or as deep as needed. You produce a structured, nested OUTLINE in pure JSON (no prose). There must be exactly one root key.
 
-FORMATTING
+<formatting>
 - Use one top-level root key that summarizes the task (e.g., "3 Course Meal For 6").
 - Under the root, each object key is a readable heading.
-- Key Casing: “All keys—including the root—MUST be Title Case (capitalize major words).”
-- No Underscores: “Underscores are forbidden in all keys. Replace with spaces.”
- - Valid JSON only. Output a single JSON object. Do not include code fences, comments, or trailing commas.
+- Key Casing: All keys—including the root—MUST be Title Case (capitalize major words).
+- No Underscores: Underscores are forbidden in all keys. Replace with spaces.
+- Valid JSON only. Output a single JSON object. Do not include code fences, comments, or trailing commas.
+</formatting>
 
-DEPTH RULE
+<depth_rule>
 - Do not stop expanding until leaves are atomic items/factors
+</depth_rule>
 
-COLLAPSING RULE
-- If a parent heading is merely a category/label for exactly one concrete child, MERGE them into one heading:
-    "<category>: <child title>"
-    and lift the child's properties under that merged heading.
+<collapsing_rule>
+- If a parent heading is merely a category/label for exactly one concrete child, MERGE them into one heading: "<category>: <child title>" and lift the child's properties under that merged heading.
 - If a category has two or more concrete children, keep the category as the parent and list children normally.
+</collapsing_rule>
 
-OUTPUT REQUIREMENTS
+<output_format>
 - JSON only. Output must be exactly one JSON object with a single root key. No code fences, no prose.
-- Keys should be human-readable; values may be objects, arrays, or strings.`;
+- Keys should be human-readable; values may be objects, arrays, or strings.
+</output_format>
+</rules>`;
 
-    let userPrompt = `Here is the user's request:\n---\nGoal: "${input.goal}"`;
-    if (input.userInput) userPrompt += `\nAdditional Instructions: ${input.userInput}`;
-    if (input.photoDataUri) userPrompt += `\nImage context is attached.`;
-    userPrompt += `\n---`;
-    if (input.projectName) userPrompt += `\n\nThis request is part of a larger folder named "${input.projectName}". Keep this context in mind.`;
-    if (input.existingTasks?.length) {
-        userPrompt += `\n\nFor context, here are some other scopes already in this folder (do not repeat or trivially rephrase these; produce complementary, non-overlapping items):`;
-        for (const t of input.existingTasks) userPrompt += `\n- ${t}`;
-    }
-    userPrompt += `\n\nReturn JSON only. Output must be exactly one JSON object with a single root key. Do not wrap in code fences.`;
+        let userPrompt = `<request>
+    <goal>${input.goal}</goal>
+    ${input.userInput ? `<user_instructions>${input.userInput}</user_instructions>` : ''}
+    ${input.photoDataUri ? `<image_present>true</image_present>` : ''}
+    ${input.projectName ? `<project_name>${input.projectName}</project_name>` : ''}
+    ${input.existingTasks?.length ? `<existing_tasks>${input.existingTasks.map(t=>`<task>${t}</task>`).join('')}</existing_tasks>` : ''}
+    <return_format>JSON-only, exactly one root key, no code fences</return_format>
+</request>`;
 
-    const response = await generateContent(userPrompt, systemPrompt, 4000);
+    const response = await generateContentBlocks({
+        system: [{ text: systemPrompt, cache: true }],
+        user: [{ text: userPrompt, cache: false }],
+        maxTokens: 4000,
+        temperature: 0.2,
+    });
     const unfenced = stripCodeFences(response);
 
     // Try JSON first, but don't enforce a schema; convert to indent-like tree for consistency

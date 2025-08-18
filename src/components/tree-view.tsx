@@ -371,8 +371,8 @@ const TaskNode = ({
                       {task.text}
                     </Linkify>
                                         {recentlyChanged?.[task.id] && (
-                                            <span className="ml-2 inline-flex items-center">
-                                                <Badge className="h-5 flex items-center" variant={recentlyChanged[task.id].kind === 'new' ? 'default' : 'secondary'}>
+                                            <span className="ml-2 flex items-center">
+                                                <Badge className="leading-none py-0.5" variant={recentlyChanged[task.id].kind === 'new' ? 'default' : 'secondary'}>
                                                     {recentlyChanged[task.id].kind === 'new' ? 'New' : 'Updated'}
                                                 </Badge>
                                             </span>
