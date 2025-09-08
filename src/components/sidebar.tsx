@@ -228,7 +228,7 @@ const SidebarTask = ({
 export function Sidebar({ 
   isOpen, onSetIsOpen, width, projects, activeProjectId, activeTaskId, sortOption, onSetSortOption, onItemSelect, onCreateProject, onCreateTask, onDeleteProject, onUpdateProject, onDeleteTask, onMoveTask, onPromoteSubtask, onExportProject
 }: SidebarProps) {
-  const { user, logOut } = useAuth();
+  const { user: _user, logOut: _logOut } = useAuth();
   const [newTaskName, setNewTaskName] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const [isAddingProject, setIsAddingProject] = useState(false);

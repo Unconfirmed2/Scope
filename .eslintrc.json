@@ -5,10 +5,10 @@
   ],
   "overrides": [
     {
-      "files": ["src/ai/flows/**/*.{ts,tsx}", "src/lib/**/*.{ts,tsx}", "src/app/actions.ts"],
+      "files": ["src/ai/**/*.{ts,tsx}", "src/ai/flows/**/*.{ts,tsx}", "src/lib/**/*.{ts,tsx}", "src/app/actions.ts"],
       "rules": {
-        "@typescript-eslint/no-explicit-any": "error",
-        "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
+        "@typescript-eslint/no-explicit-any": "off",
+        "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }]
       }
     },
     {

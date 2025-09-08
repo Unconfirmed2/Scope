@@ -27,7 +27,7 @@ export function resetTreeIdCounter() {
   nodeIdCounter = 0;
 }
 
-function toTitleCase(s: string): string {
+function _toTitleCase(s: string): string {
   return s
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')

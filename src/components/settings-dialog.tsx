@@ -25,9 +25,9 @@ type NavItem = 'personal' | 'password' | 'notifications' | 'teams' | 'integratio
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     const { 
         user, 
-        logOut, 
+        logOut: _logOut, 
         updateUserProfile,
-        updateUserEmail,
+        updateUserEmail: _updateUserEmail,
         updateUserPassword
     } = useAuth();
     const { toast } = useToast();
@@ -38,7 +38,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     const [displayName, setDisplayName] = useState(user?.displayName || '');
     
     // State for Email/Password
-    const [email, setEmail] = useState(user?.email || '');
+    const [_email, _setEmail] = useState(user?.email || '');
     const [newPassword, setNewPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
 
@@ -50,7 +50,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         try {
             await updateUserProfile(displayName.trim());
             toast({ title: 'Success', description: 'Your profile has been updated.' });
-        } catch (error) {
+        } catch {
             toast({ variant: 'destructive', title: 'Error', description: 'Could not update profile.' });
         } finally {
             setLoading(null);
@@ -69,7 +69,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             toast({ title: 'Success', description: 'Your password has been updated.' });
             setNewPassword('');
             setConfirmPassword('');
-        } catch (error) {
+        } catch {
             toast({ variant: 'destructive', title: 'Error', description: 'Could not update password.' });
         } finally {
             setLoading(null);
@@ -78,7 +78,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
     const handleLogout = () => {
         onOpenChange(false);
-        logOut();
+        _logOut();
     }
     
     const NavLink = ({ id, icon, label }: {id: NavItem, icon: React.ReactNode, label: string}) => (

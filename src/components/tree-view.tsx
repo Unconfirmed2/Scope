@@ -1,7 +1,7 @@
 
 'use client';
 import { useState, useCallback, useContext, createContext, useRef, useEffect, useMemo } from 'react';
-import type { Project, Task, AIStep, TaskStatus, SortOption } from '@/lib/types';
+import type { Project, Task, TaskStatus, SortOption } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { BrainCircuit, Trash2, RotateCw, FolderSymlink, ChevronRight, MoreHorizontal, PlusCircle, MessageSquare, Pencil, Zap, ArrowUp, ArrowDown, ClipboardCopy, CheckSquare, Square, Wand2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -11,7 +11,7 @@ import Linkify from 'linkify-react';
 import { Input } from './ui/input';
 // import { Textarea } from './ui/textarea';
 import { Checkbox } from './ui/checkbox';
-import { countDirectSubtasks, sortTasksShallow, findTaskRecursive } from '@/lib/utils';
+import { countDirectSubtasks, sortTasksShallow } from '@/lib/utils';
 // Persona feature removed
 // Legacy dialog removed; unified dialog lives in page component
 import {
@@ -91,7 +91,7 @@ const statusColors: Record<TaskStatus, string> = {
     done: 'bg-green-500',
 };
 
-const AddSubtaskForm = ({ parentId, onAdd, onCancel, placeholder, isSibling }: { parentId: string, onAdd: (text: string) => void, onCancel: () => void, placeholder: string, isSibling?: boolean }) => {
+const AddSubtaskForm = ({ parentId: _parentId, onAdd, onCancel, placeholder, isSibling }: { parentId: string, onAdd: (text: string) => void, onCancel: () => void, placeholder: string, isSibling?: boolean }) => {
     const [text, setText] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
     const formRef = useRef<HTMLFormElement>(null);
@@ -310,7 +310,7 @@ const TaskNode = ({
     const textToCopy = formatTaskToString(task, 0);
     navigator.clipboard.writeText(textToCopy).then(() => {
         toast({ title: "Outline copied to clipboard!" });
-    }, (err) => {
+    }, (_err) => {
         toast({ variant: "destructive", title: "Failed to copy", description: "Could not copy text to clipboard." });
     });
   };
@@ -531,7 +531,7 @@ const TreeStateProvider = ({ children, tasks }: { children: React.ReactNode, tas
     );
 }
 
-export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSelectedTaskIds, onUpdateProject, onUpdateTaskAndPropagate, onMoveTask, onPromoteSubtask, onAddSubtask, onAddCommentClick, onExecuteClick, onDeleteTask, sortOption, onSetSortOption, onOpenSubscopeDialog, onOpenRephraseDialog, recentlyChanged }: TreeViewProps) {
+export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSelectedTaskIds, onUpdateProject: _onUpdateProject, onUpdateTaskAndPropagate, onMoveTask, onPromoteSubtask: _onPromoteSubtask, onAddSubtask, onAddCommentClick, onExecuteClick, onDeleteTask, sortOption, onSetSortOption, onOpenSubscopeDialog, onOpenRephraseDialog, recentlyChanged }: TreeViewProps) {
     const { toast } = useToast();
     const treeState = useContext(TreeStateContext);
     const lastClickedId = useRef<string | null>(null);

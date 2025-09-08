@@ -636,7 +636,7 @@ export function useProjects() {
         return promoted;
     }
 
-    const addSubtask = (projectId: string, anchorTaskId: string, newSubtasks: Task[], isSibling: boolean): boolean => {
+    const addSubtask = (projectId: string, anchorTaskId: string, newSubtasks: Task[], _isSibling: boolean): boolean => {
         let taskAdded = false;
     applyWithHistory('Add sub-scope(s)', prevState => {
             const projectsCopy = JSON.parse(JSON.stringify(prevState.projects));
