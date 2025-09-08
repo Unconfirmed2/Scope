@@ -90,7 +90,7 @@ function parseByIndentation(textOrJson: string | object): Node[] {
     const stack: Node[] = [];
     const roots: Node[] = [];
 
-    for (let raw of lines) {
+    for (const raw of lines) {
         if (!raw.trim()) continue;
         const line = raw.replace(/\t/g, '  ');
         const m = line.match(/^(\s*)(.*)$/);
@@ -221,7 +221,7 @@ You are an advanced AI assistant tasked with analyzing and/or executing a wide v
 </output_format>
 </rules>`;
 
-        let userPrompt = `<request>
+        const userPrompt = `<request>
     <goal>${input.goal}</goal>
     ${input.userInput ? `<user_instructions>${input.userInput}</user_instructions>` : ''}
     ${input.photoDataUri ? `<image_present>true</image_present>` : ''}
