@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import type { ContentBlock, TextBlock, Message } from '@anthropic-ai/sdk/resources/messages';
 
 // Initialize Claude API client
 export const anthropic = new Anthropic({
@@ -30,8 +31,8 @@ export async function generateContent(
 
     // Concatenate any text parts; ignore non-text blocks like tool_use/images
     const text = message.content
-      .filter((block: any) => block && block.type === 'text' && typeof block.text === 'string')
-      .map((block: any) => block.text)
+      .filter((block: ContentBlock): block is TextBlock => block && block.type === 'text' && typeof block.text === 'string')
+      .map((block: TextBlock) => block.text)
       .join('\n')
       .trim();
 
@@ -63,19 +64,19 @@ export async function generateContentBlocks(
   const enableCache = process.env.ANTHROPIC_PROMPT_CACHING === '1';
 
   // Map to Anthropic content blocks, attaching cache_control when requested and enabled
-  const mapBlock = (b: CacheableTextBlock): any => ({
+  const mapBlock = (b: CacheableTextBlock): Record<string, unknown> => ({
     type: 'text',
     text: b.text,
     ...(enableCache && b.cache ? { cache_control: { type: 'ephemeral' } } : {}),
   });
 
-  const systemPayload: any = Array.isArray(system)
+  const systemPayload: string | Record<string, unknown>[] | undefined = Array.isArray(system)
     ? system.map(mapBlock)
     : system
       ? system
       : undefined;
 
-  const userPayload: any = user.map(mapBlock);
+  const userPayload: Record<string, unknown>[] = user.map(mapBlock);
 
   try {
     const message = await anthropic.messages.create({
@@ -89,12 +90,12 @@ export async function generateContentBlocks(
         },
       ],
       ...(systemPayload !== undefined ? { system: systemPayload } : {}),
-    } as any);
+    } as Anthropic.MessageCreateParams);
 
     // Optional: log cache usage hints if present in response (best-effort)
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const m: any = message as any;
+      const m: Message & { usage?: { cache_creation_tokens?: number; cache_read_tokens?: number } } = message as any;
       const usage = m?.usage;
       if (usage && (usage.cache_creation_tokens || usage.cache_read_tokens)) {
         console.debug('Anthropic cache usage', {
@@ -105,8 +106,8 @@ export async function generateContentBlocks(
     } catch {}
 
     const text = message.content
-      .filter((block: any) => block && block.type === 'text' && typeof block.text === 'string')
-      .map((block: any) => block.text)
+      .filter((block: ContentBlock): block is TextBlock => block && block.type === 'text' && typeof block.text === 'string')
+      .map((block: TextBlock) => block.text)
       .join('\n')
       .trim();
 

@@ -2,7 +2,7 @@
 'use client';
 
 import type { Project, Task, TaskStatus } from '@/lib/types';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { Button } from './ui/button';
 import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group';

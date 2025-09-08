@@ -8,7 +8,7 @@ import { handleGenerateTasks, handleGenerateProjectSummary, handleRephraseGoal, 
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, ArrowUpDown, Pencil, ChevronRight, MessageSquare, BrainCircuit, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, Folder, File, Zap as ZapIcon, Bot, List, Map as MapIcon, Columns, LogOut, User, ImagePlus, RotateCw, RotateCcw, History } from 'lucide-react';
+import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, Pencil, ChevronRight, MessageSquare, BrainCircuit, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, Folder, File, Zap as ZapIcon, Bot, List, Map as MapIcon, Columns, LogOut, User, ImagePlus, RotateCw, RotateCcw, History } from 'lucide-react';
 import { Sidebar } from '@/components/sidebar';
 import { TreeViewWrapper as TreeView } from '@/components/tree-view';
 import { KanbanView } from '@/components/kanban-view';
@@ -93,7 +93,7 @@ const convertRawToTasks = (raw: any, parentId: string | null): Task[] => {
     const fromAny = (value: any, currentParentId: string | null): Task[] => {
         if (value == null) return [];
         if (Array.isArray(value)) {
-            return value.flatMap((v, i) => fromAny(v, currentParentId));
+            return value.flatMap((v, _i) => fromAny(v, currentParentId));
         }
         if (typeof value === 'object') {
             // Generic object: each key becomes a task with nested conversion of its value
@@ -136,7 +136,7 @@ export default function Home() {
     createProject,
     createTaskInProject,
     updateProject,
-    setTasksForProject,
+    _setTasksForProject,
     addSummaryToProject,
     addSummaryToTask,
     updateTaskAndPropagateStatus,
@@ -222,7 +222,7 @@ export default function Home() {
       try {
         const dataUri = await readFileAsDataURL(file);
         setter({ file, dataUri });
-      } catch (error) {
+      } catch (_error) {
         toast({ variant: 'destructive', title: 'Error reading file', description: 'Could not process the selected file.' });
       }
     }
@@ -847,7 +847,7 @@ export default function Home() {
     }
   };
 
-  const handleDeleteSelected = () => {
+  const _handleDeleteSelected = () => {
     if(activeProjectId && selectedTaskIds.length > 0) {
         if(deleteSelectedTasks(activeProjectId, selectedTaskIds)) {
             toast({ title: `${selectedTaskIds.length} scope(s) deleted`, variant: 'default' });

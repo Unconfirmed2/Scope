@@ -27,14 +27,6 @@ export function resetTreeIdCounter() {
   nodeIdCounter = 0;
 }
 
-function toTitleCase(s: string): string {
-  return s
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\w\S*/g, (t) => t.charAt(0).toUpperCase() + t.slice(1));
-}
-
 function joinPointer(parent: string, token: string): string {
   // Escape per RFC 6901: ~ -> ~0, / -> ~1
   const escaped = token.replace(/~/g, '~0').replace(/\//g, '~1');
