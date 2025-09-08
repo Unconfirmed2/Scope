@@ -170,7 +170,7 @@ function nodesToPlain(nodes: Node[]): any[] {
     return nodes.map(map);
 }
 
-function deriveSynthesis(nodes: Node[]): string | undefined {
+function _deriveSynthesis(nodes: Node[]): string | undefined {
     // Find a node named like a conclusion and gather its leaf text
     const isSynthesisTitle = (t: string) => /^(synthesis|summary|conclusion|overall|takeaways|notes)$/i.test(t.trim());
     const queue = [...nodes];
