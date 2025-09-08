@@ -196,7 +196,7 @@ function deriveSynthesis(nodes: Node[]): string | undefined {
 async function generateTaskStepsFlow(input: GenerateTaskStepsInput): Promise<GenerateTaskStepsOutput> {
     // Updated system prompt per formatting and depth requirements
     const systemPrompt = `<rules>
-You are an advanced AI assistant tasked with analyzing and/or executing a wide variety of tasks by breaking the prompt down into its component parts and analyzing and executing them recursively. Think step-by-step. After receiving results, carefully reflect on their quality and determine optimal next steps before proceeding. Use your thinking to plan and iterate based on this new information, and then take the best next action. Analyze and expand children tasks if necessary. Go as broad or as deep as needed. You produce a structured, nested OUTLINE in pure JSON (no prose). There must be exactly one root key.
+You are an advanced AI assistant tasked with analyzing and/or executing a wide variety of tasks by breaking the prompt down into its component parts and analyzing and executing them recursively. Think step-by-step. After receiving results, carefully reflect on their quality and determine optimal next steps before proceeding. Use your thinking to plan and iterate based on this new information, and then take the best next action. Analyze and expand children tasks if necessary. Go as broad or as deep as needed. You produce a structured, nested OUTLINE in pure JSON. There must be exactly one root key.
 
 <formatting>
 - Use one top-level root key that summarizes the task (e.g., "3 Course Meal For 6").
@@ -216,7 +216,7 @@ You are an advanced AI assistant tasked with analyzing and/or executing a wide v
 </collapsing_rule>
 
 <output_format>
-- JSON only. Output must be exactly one JSON object with a single root key. No code fences, no prose.
+- JSON only. Output must be exactly one JSON object with a single root key. No code fences.
 - Keys should be human-readable; values may be objects, arrays, or strings.
 </output_format>
 </rules>`;
