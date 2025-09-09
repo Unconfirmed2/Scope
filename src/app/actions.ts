@@ -158,6 +158,7 @@ const DependencyCandidateSchema = z.object({
     path: z.string(),
     text: z.string().optional(),
     description: z.string().optional(),
+    romanIndex: z.string().optional(),
 });
 
 const AlternativeScopeInputSchema = z.object({

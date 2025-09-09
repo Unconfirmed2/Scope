@@ -23,7 +23,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { useProjects } from '@/hooks/use-projects';
-import { findTaskPath, countCommentsRecursively, sortProjects, scanDependencies } from '@/lib/utils';
+import { findTaskPath, countCommentsRecursively, sortProjects, scanDependencies, assignRomanNumeralIndices, createRomanToIdMap } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -458,8 +458,12 @@ export default function Home() {
                     setIsGenerating(false);
                     return;
                 }
-                // Build dependency candidates via lightweight scan
-                const depCandidates = scanDependencies(targetProject.tasks, parentTask.text);
+                // Build dependency candidates via lightweight scan with Roman numeral indexing
+                const romanIndexMap = assignRomanNumeralIndices(targetProject.tasks);
+                const depCandidates = scanDependencies(targetProject.tasks, parentTask.text).map(candidate => ({
+                    ...candidate,
+                    romanIndex: romanIndexMap.get(candidate.id)
+                }));
                 const parentBreadcrumb = findTaskPath(targetProject.tasks, parentTask.id).map(t => t.text).slice(0, -1);
                 const siblingTitles = (() => {
                     if (!parentTask.parentId) return targetProject.tasks.filter(t => t.id !== parentTask.id).map(t => t.text);

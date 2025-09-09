@@ -7,6 +7,7 @@ export type DependencyCandidate = {
   path: string; // human-readable breadcrumb path
   text?: string;
   description?: string;
+  romanIndex?: string; // Roman numeral index for AI reference
 };
 
 export type AlternativeScopeInput = {
@@ -23,6 +24,7 @@ export type AlternativeScopeInput = {
 
   // Dependency handling
   dependencyCandidates: DependencyCandidate[];
+  romanIndexMap?: Map<string, string>; // Map from task ID to Roman numeral
 
   // Context control
   projectName?: string;
@@ -36,6 +38,7 @@ export type AlternativeScopeOutput = {
   // Minimal patches to related items
   Updates: Array<{
     "Target Id": string;
+    "Roman Index"?: string; // Roman numeral reference for AI convenience
     Changes: Array<{
       Path: string; // JSON Pointer to field, e.g., "/text" or "/description"
       Op: "replace" | "update";
@@ -52,7 +55,7 @@ export type AlternativeScopeOutput = {
 };
 
 export async function generateAlternativeScope(input: AlternativeScopeInput): Promise<AlternativeScopeOutput> {
-  const { selectedNode, parentPathTitles, siblingTitles, inferredType, dependencyCandidates, projectName, fullProjectJson, trimmedContext } = input;
+  const { selectedNode, parentPathTitles, siblingTitles, inferredType, dependencyCandidates, romanIndexMap, projectName, fullProjectJson, trimmedContext } = input;
 
   const system = `<rules>
 <output_contract>
@@ -84,7 +87,7 @@ This response MUST contain exactly three top-level keys:
 </task>`);
 
   if (dependencyCandidates?.length) {
-    userParts.push(`<dependency_candidates>${dependencyCandidates.slice(0,50).map(c=>`<candidate><id>${c.id}</id><path>${c.path}</path>${c.text?`<text>${c.text}</text>`:''}${c.description?`<description>${c.description}</description>`:''}</candidate>`).join('')}</dependency_candidates>`);
+    userParts.push(`<dependency_candidates>${dependencyCandidates.slice(0,50).map(c=>`<candidate><roman_index>${c.romanIndex || romanIndexMap?.get(c.id) || ''}</roman_index><id>${c.id}</id><path>${c.path}</path>${c.text?`<text>${c.text}</text>`:''}${c.description?`<description>${c.description}</description>`:''}</candidate>`).join('')}</dependency_candidates>`);
   }
 
   if (fullProjectJson) {
@@ -97,6 +100,8 @@ This response MUST contain exactly three top-level keys:
   - Create a different ${inferred} to REPLACE the selected node. Keep its format/nesting depth similar (not identical content).
   - Do NOT paraphrase; produce a DISTINCT alternative title/content.
   - Limit updates to /text or /description fields with minimal phrasing changes.
+  - Each dependency candidate has a roman_index (I, II, III, etc.) for reference. You may reference these indices in your reasoning.
+  - When providing Updates, you can optionally include the "Roman Index" for clarity, but "Target Id" is still required.
   - Leave everything else unchanged.
   - Return JSON with exactly these three top-level keys: "New Task Outline", "Updates", "Changes Summary".
 </instructions>`);
@@ -155,11 +160,12 @@ This response MUST contain exactly three top-level keys:
         : [];
 
     const allowedPaths = new Set(["/text", "/description"]);
-    const normUpdates = [] as Array<{ "Target Id": string; Changes: any[] }>;
+    const normUpdates = [] as Array<{ "Target Id": string; "Roman Index"?: string; Changes: any[] }>;
     for (const u of rawUpdates) {
       if (!u || typeof u !== "object") continue;
       const targetId = u["Target Id"] ?? u["TargetID"] ?? u["TargetId"] ?? u["targetId"] ?? u["target_id"];
       if (!targetId || typeof targetId !== "string") continue;
+      const romanIndex = u["Roman Index"] ?? u["roman_index"] ?? u["romanIndex"];
       const changesSrc = Array.isArray(u.Changes) ? u.Changes : Array.isArray(u.changes) ? u.changes : [];
       const changes = [] as any[];
       for (const c of changesSrc) {
@@ -173,7 +179,11 @@ This response MUST contain exactly three top-level keys:
         changes.push(entry);
       }
       if (changes.length) {
-        normUpdates.push({ "Target Id": targetId, Changes: changes });
+        const updateEntry: any = { "Target Id": targetId, Changes: changes };
+        if (romanIndex && typeof romanIndex === "string") {
+          updateEntry["Roman Index"] = romanIndex;
+        }
+        normUpdates.push(updateEntry);
       }
     }
     out.Updates = normUpdates;

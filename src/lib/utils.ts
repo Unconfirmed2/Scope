@@ -200,18 +200,43 @@ export function findTaskRecursive(tasks: Task[], taskId: string): Task | null {
     return null;
 }
 
-    // Lightweight dependency scan: find nodes whose text/description mention the given phrase (case-insensitive)
+    // Enhanced dependency scan: find nodes whose text/description/executionResults/summaries/comments mention the given phrase (case-insensitive)
     export function scanDependencies(tasks: Task[], phrase: string): { id: string; path: string; text?: string; description?: string }[] {
         const results: { id: string; path: string; text?: string; description?: string }[] = [];
         const stack: { node: Task; path: string[] }[] = tasks.map(t => ({ node: t, path: [t.text] }));
         const lower = phrase.trim().toLowerCase();
+        
         while (stack.length) {
             const { node, path } = stack.pop()!;
+            
+            // Check text and description (existing functionality)
             const inText = node.text?.toLowerCase().includes(lower);
             const inDesc = (node.description || '').toLowerCase().includes(lower);
-            if (inText || inDesc) {
+            
+            // Check execution results
+            const inExecutionResults = (node.executionResults || []).some(result => 
+                result.resultText?.toLowerCase().includes(lower)
+            );
+            
+            // Check summaries
+            const inSummaries = (node.summaries || []).some(summary => 
+                summary.text?.toLowerCase().includes(lower)
+            );
+            
+            // Check comments recursively
+            const checkCommentsForPhrase = (comments: Comment[]): boolean => {
+                return comments.some(comment => {
+                    const commentMatch = comment.text?.toLowerCase().includes(lower);
+                    const repliesMatch = comment.replies ? checkCommentsForPhrase(comment.replies) : false;
+                    return commentMatch || repliesMatch;
+                });
+            };
+            const inComments = checkCommentsForPhrase(node.comments || []);
+            
+            if (inText || inDesc || inExecutionResults || inSummaries || inComments) {
                 results.push({ id: node.id, path: path.join(' > '), text: node.text, description: node.description });
             }
+            
             if (node.subtasks && node.subtasks.length) {
                 for (const c of node.subtasks) stack.push({ node: c, path: [...path, c.text] });
             }
@@ -220,6 +245,72 @@ export function findTaskRecursive(tasks: Task[], taskId: string): Task | null {
         const seen = new Set<string>();
         return results.filter(r => (seen.has(r.id) ? false : (seen.add(r.id), true)));
     }
+
+// Roman numeral utilities for stable indexing
+export function toRomanNumeral(num: number): string {
+    const values = [1000, 900, 500, 400, 100, 90, 50, 40, 10, 9, 5, 4, 1];
+    const numerals = ['M', 'CM', 'D', 'CD', 'C', 'XC', 'L', 'XL', 'X', 'IX', 'V', 'IV', 'I'];
+    
+    let result = '';
+    for (let i = 0; i < values.length; i++) {
+        const count = Math.floor(num / values[i]);
+        if (count > 0) {
+            result += numerals[i].repeat(count);
+            num -= values[i] * count;
+        }
+    }
+    return result;
+}
+
+export function fromRomanNumeral(roman: string): number {
+    const values: Record<string, number> = {
+        'M': 1000, 'CM': 900, 'D': 500, 'CD': 400, 'C': 100, 'XC': 90,
+        'L': 50, 'XL': 40, 'X': 10, 'IX': 9, 'V': 5, 'IV': 4, 'I': 1
+    };
+    
+    let result = 0;
+    let i = 0;
+    const romanUpper = roman.toUpperCase();
+    
+    while (i < romanUpper.length) {
+        if (i + 1 < romanUpper.length && values[romanUpper.substring(i, i + 2)]) {
+            result += values[romanUpper.substring(i, i + 2)];
+            i += 2;
+        } else {
+            result += values[romanUpper[i]];
+            i += 1;
+        }
+    }
+    return result;
+}
+
+// Stable indexing pass that assigns Roman numeral labels to nodes
+export function assignRomanNumeralIndices(tasks: Task[]): Map<string, string> {
+    const indexMap = new Map<string, string>();
+    let counter = 1;
+    
+    const traverse = (taskList: Task[]) => {
+        for (const task of taskList) {
+            indexMap.set(task.id, toRomanNumeral(counter));
+            counter++;
+            if (task.subtasks && task.subtasks.length > 0) {
+                traverse(task.subtasks);
+            }
+        }
+    };
+    
+    traverse(tasks);
+    return indexMap;
+}
+
+// Reverse mapping from Roman numeral to task ID
+export function createRomanToIdMap(indexMap: Map<string, string>): Map<string, string> {
+    const reverseMap = new Map<string, string>();
+    for (const [taskId, roman] of indexMap.entries()) {
+        reverseMap.set(roman, taskId);
+    }
+    return reverseMap;
+}
 
 function countCommentsInList(comments: Comment[]): number {
     let count = 0;
