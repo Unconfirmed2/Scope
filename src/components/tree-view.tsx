@@ -343,8 +343,8 @@ const TaskNode = ({
               />
             </div>
             
-            <div className="flex-grow flex items-start gap-2">
-                <div className="flex items-center gap-2 pt-1 shrink-0">
+            <div className="flex-grow flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                     {statusSelector}
                 </div>
 
@@ -360,7 +360,7 @@ const TaskNode = ({
                 ) : (
                   <span 
                     className={cn(
-                      'flex-grow whitespace-normal break-words pt-0.5', 
+                      'flex-grow whitespace-normal break-words', 
                       task.completed && 'line-through text-muted-foreground',
                       task.description && 'cursor-pointer hover:text-primary/80'
                     )}
