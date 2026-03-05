@@ -18,7 +18,7 @@ const ProposeChangesInputSchema = z.object({
 });
 export type ProposeChangesInput = z.infer<typeof ProposeChangesInputSchema>;
 
-const ProposeChangesOutputSchema = z.object({
+const _ProposeChangesOutputSchema = z.object({
   summary: z.string().describe('1-2 sentences describing the intended change in plain English.'),
   bullets: z.array(z.string()).optional().describe('Optional short bullet points with key highlights.'),
 });

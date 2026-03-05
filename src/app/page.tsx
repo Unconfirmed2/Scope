@@ -3,12 +3,11 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type { Task, SortOption, Project } from '@/lib/types';
-// Persona feature removed
 import { handleGenerateTasks, handleGenerateProjectSummary, handleRephraseGoal, handleGenerateAlternativeScope, handleProposeChanges } from './actions';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, ArrowUpDown, Pencil, ChevronRight, MessageSquare, BrainCircuit, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, Folder, File, Zap as ZapIcon, Bot, List, Map as MapIcon, Columns, LogOut, User, ImagePlus, RotateCw, RotateCcw, History } from 'lucide-react';
+import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, Pencil, ChevronRight, MessageSquare, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, LogOut, User, ImagePlus, RotateCw, RotateCcw, History } from 'lucide-react';
 import { Sidebar } from '@/components/sidebar';
 import { TreeViewWrapper as TreeView } from '@/components/tree-view';
 import { KanbanView } from '@/components/kanban-view';
@@ -18,6 +17,8 @@ import { SummaryView } from '@/components/summary-view';
 import { ExecutionView } from '@/components/execution-view';
 import { AuthDialog } from '@/components/auth-dialog';
 import { SettingsDialog } from '@/components/settings-dialog';
+import { HistoryDialog } from '@/components/history-dialog';
+import { HelpDialog } from '@/components/help-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from '@/components/ui/textarea';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -28,20 +29,14 @@ import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Label } from '@/components/ui/label';
-// import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import type { GenerateTaskStepsOutput } from '@/ai/flows/generate-task-steps';
-// import { Slider } from '@/components/ui/slider';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
-// import Linkify from 'linkify-react';
 import React from 'react';
 import { useAuth } from '@/hooks/use-auth';
-// import { useRouter } from 'next/navigation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import Image from 'next/image';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
-// Persona feature removed
 
 const readFileAsDataURL = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -93,7 +88,7 @@ const convertRawToTasks = (raw: any, parentId: string | null): Task[] => {
     const fromAny = (value: any, currentParentId: string | null): Task[] => {
         if (value == null) return [];
         if (Array.isArray(value)) {
-            return value.flatMap((v, i) => fromAny(v, currentParentId));
+            return value.flatMap((v) => fromAny(v, currentParentId));
         }
         if (typeof value === 'object') {
             // Generic object: each key becomes a task with nested conversion of its value
@@ -136,7 +131,6 @@ export default function Home() {
     createProject,
     createTaskInProject,
     updateProject,
-    setTasksForProject,
     addSummaryToProject,
     addSummaryToTask,
     updateTaskAndPropagateStatus,
@@ -192,7 +186,6 @@ export default function Home() {
   const [confirmationInput, setConfirmationInput] = useState('');
   const [confirmationImage, setConfirmationImage] = useState<{file: File, dataUri: string} | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-    // Persona feature removed
     const isRefineMode = useMemo(() => Boolean(confirmationInput.trim() || confirmationImage), [confirmationInput, confirmationImage]);
     // Unified confirmation dialog mode
         const [confirmationMode, setConfirmationMode] = useState<{ type: 'initial' | 'subscope' | 'regenerate' | 'alternative'; targetTaskId?: string }>({ type: 'initial' });
@@ -222,7 +215,7 @@ export default function Home() {
       try {
         const dataUri = await readFileAsDataURL(file);
         setter({ file, dataUri });
-      } catch (error) {
+      } catch {
         toast({ variant: 'destructive', title: 'Error reading file', description: 'Could not process the selected file.' });
       }
     }
@@ -847,14 +840,6 @@ export default function Home() {
     }
   };
 
-  const handleDeleteSelected = () => {
-    if(activeProjectId && selectedTaskIds.length > 0) {
-        if(deleteSelectedTasks(activeProjectId, selectedTaskIds)) {
-            toast({ title: `${selectedTaskIds.length} scope(s) deleted`, variant: 'default' });
-        }
-    }
-  };
-  
   const viewOptions: Record<string, { label: string; icon: React.ElementType; hidden?: boolean }> = {
     'list': { label: 'List View', icon: ListTree },
     'mindmap': { label: 'Mind Map', icon: Waypoints },
@@ -912,7 +897,10 @@ export default function Home() {
   if (authLoading && !isLoaded) {
     return (
         <div className="flex h-screen w-full items-center justify-center bg-background">
-            <Loader2 className="h-16 w-16 animate-spin text-primary" />
+            <div className="flex flex-col items-center gap-4">
+                <Loader2 className="h-12 w-12 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">Loading your workspace...</p>
+            </div>
         </div>
     );
   }
@@ -1389,102 +1377,10 @@ export default function Home() {
                 </div>
             </main>
         </div>
-        <Dialog open={isHelpOpen} onOpenChange={setIsHelpOpen}>
-            <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
-                 <DialogHeader>
-                    <DialogTitle>Help & Information</DialogTitle>
-                    <DialogDescription>
-                        Learn how to use Scope to its full potential.
-                    </DialogDescription>
-                </DialogHeader>
-                <ScrollArea className="flex-grow pr-6 -mr-6">
-                    <Accordion type="single" collapsible className="w-full">
-                        <AccordionItem value="item-1">
-                            <AccordionTrigger>What is Scope?</AccordionTrigger>
-                            <AccordionContent>
-                            Scope is a tool for breaking down complex goals into manageable, hierarchical scopes. Use it to plan projects, create checklists, brainstorm ideas, and more. The application leverages AI to help you generate, refine, and execute these scopes, turning high-level ideas into actionable plans.
-                            </AccordionContent>
-                        </AccordionItem>
-                        <AccordionItem value="item-2">
-                            <AccordionTrigger>Folders & Scopes</AccordionTrigger>
-                            <AccordionContent className="space-y-2">
-                                <p><strong className="font-semibold">Folders:</strong> ( <Folder className="inline-block" /> ) Represent high-level projects or containers for your work. You can create, rename, and sort them in the sidebar.</p>
-                                <p><strong className="font-semibold">Scopes:</strong> ( <File className="inline-block" /> ) Are individual tasks or ideas. They can be nested to create a hierarchy. A scope with sub-scopes acts as a parent, and its status (To Do, In Progress, Done) is automatically calculated based on its children.</p>
-                                <p><strong className="font-semibold">Adding Scopes:</strong> Use the main input bar at the top. Type your goal and click "Add Scope". The AI will treat it as a case study, breaking it down into a structured list of sub-scopes for you.</p>
-                            </AccordionContent>
-                        </AccordionItem>
-                        <AccordionItem value="item-3">
-                            <AccordionTrigger>Using the AI</AccordionTrigger>
-                            <AccordionContent className="space-y-2">
-                                <p><strong className="font-semibold">Generate Scopes (Case Study Method):</strong> ( <Bot className="inline-block text-primary" /> ) The primary way to use the AI. Describe a goal, and the AI will act as a consultant, breaking it down into a hierarchical plan (L1, L2, L3...) and providing a synthesis.</p>
-                                <p><strong className="font-semibold">Execute:</strong> ( <ZapIcon className="inline-block text-yellow-500" /> ) On any scope, use the "Execute" action to have the AI perform a deep-dive case study on the topic and provide a detailed report. Results appear in the "Execution" view.</p>
-                                <p><strong className="font-semibold">Rephrase Scope Title:</strong> ( <Pencil className="inline-block text-cyan-500" /> ) Refine the text of a scope without changing its children.</p>
-                                <p><strong className="font-semibold">Generate Sub-scopes:</strong> ( <BrainCircuit className="inline-block text-primary" /> ) Ask AI to add new sub-scopes under a scope (append).</p>
-                                <p><strong className="font-semibold">Regenerate Sub-scopes:</strong> ( <RotateCw className="inline-block text-blue-500" /> ) Replace all existing sub-scopes under a scope with a fresh AI-generated set.</p>
-                            </AccordionContent>
-                        </AccordionItem>
-                        <AccordionItem value="item-4">
-                            <AccordionTrigger>Content Views</AccordionTrigger>
-                            <AccordionContent className="space-y-2">
-                                <p><strong className="font-semibold">List View:</strong> ( <List className="inline-block" /> ) The primary hierarchical view for managing your scopes.</p>
-                                <p><strong className="font-semibold">Mind Map:</strong> ( <MapIcon className="inline-block" /> ) A visual representation of your scope hierarchy, great for brainstorming and understanding relationships.</p>
-                                <p><strong className="font-semibold">Kanban View:</strong> ( <Columns className="inline-block" /> ) A board view organizing scopes by their status (To Do, In Progress, Done).</p>
-                                <p><strong className="font-semibold">Execution, Comments, Summary:</strong> These views show AI execution results, user comments, and AI-generated summaries for the selected folder or scope.</p>
-                            </AccordionContent>
-                        </AccordionItem>
-                    </Accordion>
-                </ScrollArea>
-                <DialogFooter className="pt-4 border-t">
-                    <Button onClick={() => setIsHelpOpen(false)}>Close</Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+        <HelpDialog open={isHelpOpen} onOpenChange={setIsHelpOpen} />
         <AuthDialog open={isAuthDialogOpen} onOpenChange={setIsAuthDialogOpen} />
         <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
-        {/* Simple history info modal (list only; undo/redo are buttons in header) */}
-        <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
-            <DialogContent className="max-w-md">
-                <DialogHeader>
-                    <DialogTitle>History</DialogTitle>
-                    <DialogDescription>Use Undo/Redo in the header to revert or reapply changes.</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-3">
-                    <div>
-                        <div className="text-xs uppercase text-muted-foreground mb-1">Past (oldest → newest)</div>
-                        <ul className="max-h-48 overflow-auto border rounded p-2 text-sm">
-                            {historyPast.length === 0 ? (
-                                <li className="text-muted-foreground">No history yet</li>
-                            ) : (
-                                historyPast.map((h, i) => (
-                                    <li key={i} className="py-1 border-b last:border-b-0">
-                                        <div className="font-medium">{h.label || 'Change'}</div>
-                                        <div className="text-xs text-muted-foreground">{new Date(h.timestamp).toLocaleString()}</div>
-                                    </li>
-                                ))
-                            )}
-                        </ul>
-                    </div>
-                    <div>
-                        <div className="text-xs uppercase text-muted-foreground mb-1">Future (will redo)</div>
-                        <ul className="max-h-24 overflow-auto border rounded p-2 text-sm">
-                            {historyFuture.length === 0 ? (
-                                <li className="text-muted-foreground">Empty</li>
-                            ) : (
-                                historyFuture.map((h, i) => (
-                                    <li key={i} className="py-1 border-b last:border-b-0">
-                                        <div className="font-medium">{h.label || 'Change'}</div>
-                                        <div className="text-xs text-muted-foreground">{new Date(h.timestamp).toLocaleString()}</div>
-                                    </li>
-                                ))
-                            )}
-                        </ul>
-                    </div>
-                </div>
-                <DialogFooter>
-                    <Button onClick={() => setIsHistoryOpen(false)}>Close</Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+        <HistoryDialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen} historyPast={historyPast} historyFuture={historyFuture} />
         <Dialog open={!!commentingTask} onOpenChange={(isOpen) => !isOpen && handleCloseCommentDialog()}>
             <DialogContent>
                 <DialogHeader>

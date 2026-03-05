@@ -1,5 +1,3 @@
-'use server';
-
 import { NextResponse } from 'next/server';
 
 // Placeholder to satisfy Next.js type generation when NextAuth is not configured.

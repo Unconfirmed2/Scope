@@ -25,10 +25,10 @@ const localAllowedHosts = [
 const nextConfig: NextConfig = {
   /* config options here */
   typescript: {
-    ignoreBuildErrors: true,
+    ignoreBuildErrors: false,
   },
   eslint: {
-    ignoreDuringBuilds: true,
+    ignoreDuringBuilds: false,
   },
   // Performance optimizations
   compress: true,
@@ -51,7 +51,7 @@ const nextConfig: NextConfig = {
     '@opentelemetry/semantic-conventions',
   ],
   // Fine-tune Webpack to avoid resolving optional packages that cause build errors
-  webpack: (config, { isServer }) => {
+  webpack: (config: Record<string, any>, { isServer }: { isServer: boolean }) => {
     config.resolve = config.resolve || {} as any;
     (config.resolve.alias as Record<string, any>) = {
       ...(config.resolve.alias || {}),
@@ -70,27 +70,25 @@ const nextConfig: NextConfig = {
     }
     return config;
   },
-  // Add headers to handle CORS and MIME types in Codespaces
-  ...(codespaceName && process.env.NODE_ENV === 'development' ? {
-    async headers() {
-      return [
-        {
-          source: '/(.*)',
-          headers: [
-            {
-              key: 'Access-Control-Allow-Origin',
-              value: codespaceOrigin || '*',
-            },
-            {
-              key: 'Access-Control-Allow-Methods',
-              value: 'GET, POST, PUT, DELETE, OPTIONS',
-            },
-            {
-              key: 'Access-Control-Allow-Headers',
-              value: 'Content-Type, Authorization, x-forwarded-host, origin',
-            },
-          ],
-        },
+  // Security and CORS headers
+  async headers() {
+    const securityHeaders = [
+      { key: 'X-Content-Type-Options', value: 'nosniff' },
+      { key: 'X-Frame-Options', value: 'DENY' },
+      { key: 'X-XSS-Protection', value: '1; mode=block' },
+      { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+    ];
+    const codespaceHeaders = codespaceName && process.env.NODE_ENV === 'development' ? [
+      { key: 'Access-Control-Allow-Origin', value: codespaceOrigin || '*' },
+      { key: 'Access-Control-Allow-Methods', value: 'GET, POST, PUT, DELETE, OPTIONS' },
+      { key: 'Access-Control-Allow-Headers', value: 'Content-Type, Authorization, x-forwarded-host, origin' },
+    ] : [];
+    return [
+      {
+        source: '/(.*)',
+        headers: [...securityHeaders, ...codespaceHeaders],
+      },
+      ...(codespaceName && process.env.NODE_ENV === 'development' ? [
         {
           source: '/_next/static/chunks/(.*)\\.css',
           headers: [
@@ -127,9 +125,9 @@ const nextConfig: NextConfig = {
             },
           ],
         },
-      ];
-    },
-  } : {}),
+      ] : []),
+    ];
+  },
   images: {
     remotePatterns: [
       {

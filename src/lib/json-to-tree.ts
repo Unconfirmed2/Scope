@@ -27,7 +27,7 @@ export function resetTreeIdCounter() {
   nodeIdCounter = 0;
 }
 
-function toTitleCase(s: string): string {
+function _toTitleCase(s: string): string {
   return s
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -42,8 +42,8 @@ function joinPointer(parent: string, token: string): string {
   return parent + '/' + escaped;
 }
 
-export function parseJSONToTree(data: any, name = 'Root', pointer: string = '/'): TreeNode {
-  const isPrimitive = (val: any) => val === null || val === undefined || typeof val !== 'object';
+export function parseJSONToTree(data: unknown, name = 'Root', pointer: string = '/'): TreeNode {
+  const isPrimitive = (val: unknown): val is string | number | boolean | null | undefined => val === null || val === undefined || typeof val !== 'object';
 
   const node: TreeNode = {
     id: nodeIdCounter++,

@@ -11,11 +11,16 @@ import { proposeChanges, type ProposeChangesInput } from '@/ai/flows/propose-cha
 import { type Task, type Project, type CommentStatus, type TaskStatus, type Comment, type ExecutionResult } from '@/lib/types';
 
 
+// Input length limits to prevent abuse
+const MAX_GOAL_LENGTH = 5000;
+const MAX_USER_INPUT_LENGTH = 10000;
+const MAX_PROJECT_NAME_LENGTH = 200;
+
 const GenerateTasksInputSchema = z.object({
-    goal: z.string(),
-    userInput: z.string().optional(),
-    projectName: z.string().optional(),
-    existingTasks: z.array(z.string()).optional(),
+    goal: z.string().min(1, 'Goal is required').max(MAX_GOAL_LENGTH, `Goal must be under ${MAX_GOAL_LENGTH} characters`),
+    userInput: z.string().max(MAX_USER_INPUT_LENGTH).optional(),
+    projectName: z.string().max(MAX_PROJECT_NAME_LENGTH).optional(),
+    existingTasks: z.array(z.string().max(500)).max(200).optional(),
     photoDataUri: z.string().optional(),
 });
 type GenerateTasksInput = z.infer<typeof GenerateTasksInputSchema>;

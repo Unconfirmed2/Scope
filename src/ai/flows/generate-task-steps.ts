@@ -20,7 +20,7 @@ export type GenerateTaskStepsInput = {
 
 export type GenerateTaskStepsOutput = {
     // The raw structure returned by the AI. Prefer the original JSON without normalization.
-    raw: any;
+    raw: Record<string, unknown> | unknown[] | string;
     // Optional tree representation derived from raw JSON (if available) or fallback.
     tree?: TreeNode;
 };
@@ -32,7 +32,7 @@ function stripCodeFences(s: string): string {
     return m ? m[1].trim() : s.trim();
 }
 
-function tryParseJsonObject(s: string): any | null {
+function tryParseJsonObject(s: string): Record<string, unknown> | null {
     try {
         const first = s.indexOf('{');
         const last = s.lastIndexOf('}');
@@ -46,7 +46,7 @@ function tryParseJsonObject(s: string): any | null {
     }
 }
 
-function toLinesForIndentParsing(input: any): string[] {
+function toLinesForIndentParsing(input: string | object): string[] {
     // If it's already text, return lines; if it's JSON, pretty-print to a nested outline-like form
     if (typeof input === 'string') {
         return input.replace(/\r/g, '').split('\n');
@@ -90,7 +90,7 @@ function parseByIndentation(textOrJson: string | object): Node[] {
     const stack: Node[] = [];
     const roots: Node[] = [];
 
-    for (let raw of lines) {
+    for (const raw of lines) {
         if (!raw.trim()) continue;
         const line = raw.replace(/\t/g, '  ');
         const m = line.match(/^(\s*)(.*)$/);
@@ -161,8 +161,10 @@ function placeNode(node: Node, roots: Node[], stack: Node[]) {
 }
 
 // Convert the indentation nodes into a plain nested structure for fallback only
-function nodesToPlain(nodes: Node[]): any[] {
-    const map = (n: Node): any => ({
+type PlainNode = { title: string; content?: string[]; children?: PlainNode[] };
+
+function nodesToPlain(nodes: Node[]): PlainNode[] {
+    const map = (n: Node): PlainNode => ({
         title: n.title,
         ...(n.content.length ? { content: n.content } : {}),
         ...(n.children.length ? { children: n.children.map(map) } : {}),
@@ -170,7 +172,7 @@ function nodesToPlain(nodes: Node[]): any[] {
     return nodes.map(map);
 }
 
-function deriveSynthesis(nodes: Node[]): string | undefined {
+function _deriveSynthesis(nodes: Node[]): string | undefined {
     // Find a node named like a conclusion and gather its leaf text
     const isSynthesisTitle = (t: string) => /^(synthesis|summary|conclusion|overall|takeaways|notes)$/i.test(t.trim());
     const queue = [...nodes];
@@ -221,7 +223,7 @@ You are an advanced AI assistant tasked with analyzing and/or executing a wide v
 </output_format>
 </rules>`;
 
-        let userPrompt = `<request>
+        const userPrompt = `<request>
     <goal>${input.goal}</goal>
     ${input.userInput ? `<user_instructions>${input.userInput}</user_instructions>` : ''}
     ${input.photoDataUri ? `<image_present>true</image_present>` : ''}
@@ -251,7 +253,7 @@ You are an advanced AI assistant tasked with analyzing and/or executing a wide v
             if (keys.length === 1) {
                 const rootKey = keys[0];
                 const pointer = '/' + escapeToken(rootKey);
-                tree = parseJSONToTree((json as any)[rootKey], rootKey, pointer);
+                tree = parseJSONToTree(json[rootKey], rootKey, pointer);
             } else {
                 tree = parseJSONToTree(json, 'Root');
             }

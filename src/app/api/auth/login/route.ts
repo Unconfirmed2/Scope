@@ -1,5 +1,3 @@
-'use server';
-
 import { NextResponse } from 'next/server';
 
 const MODE = process.env.BACKEND_MODE || process.env.NEXT_PUBLIC_BACKEND_MODE || 'local';

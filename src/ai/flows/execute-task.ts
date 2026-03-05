@@ -52,7 +52,7 @@ Format: human-readable document (paragraphs, '-' bullets). Avoid '#' headers unl
   }
 
   if (validated.otherTasks && validated.otherTasks.length > 0) {
-    userPrompt += `\n<other_tasks>${validated.otherTasks.map(t=>`<task>${t}</task>`).join('')}</other_tasks>`;
+    userPrompt += `\n<other_tasks>${validated.otherTasks.map((t: string)=>`<task>${t}</task>`).join('')}</other_tasks>`;
   }
 
   userPrompt += `\n<final_instruction>Generate your full case study report now.</final_instruction></request>`;

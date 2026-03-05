@@ -207,20 +207,30 @@ export function useProjects() {
         }
     }, [user, loading]);
 
-    // This effect handles saving data to localStorage
+    // This effect handles saving data to localStorage with storage monitoring
     useEffect(() => {
         if (state.isLoaded && !loading) {
             try {
                 const projectKey = user ? `projects_${user.uid}` : 'projects_anonymous';
                 const activeItemKey = user ? `activeItem_${user.uid}` : 'activeItem_anonymous';
                 const historyKey = user ? `history_${user.uid}` : 'history_anonymous';
-                window.localStorage.setItem(projectKey, JSON.stringify(state.projects));
+                const projectsJson = JSON.stringify(state.projects);
+                const historyJson = JSON.stringify({ past: state.historyPast, future: state.historyFuture });
+
+                // Monitor storage usage (localStorage is typically ~5MB)
+                const totalBytes = projectsJson.length + historyJson.length;
+                const STORAGE_WARNING_THRESHOLD = 4 * 1024 * 1024; // 4MB
+                if (totalBytes > STORAGE_WARNING_THRESHOLD) {
+                    console.warn(`localStorage usage high: ${(totalBytes / 1024 / 1024).toFixed(1)}MB. Consider exporting your data.`);
+                }
+
+                window.localStorage.setItem(projectKey, projectsJson);
                 window.localStorage.setItem(activeItemKey, JSON.stringify(state.activeItem));
-                window.localStorage.setItem(historyKey, JSON.stringify({ past: state.historyPast, future: state.historyFuture }));
+                window.localStorage.setItem(historyKey, historyJson);
                 if (saveError) setSaveError(null);
             } catch (error) {
                 console.warn(`Error writing to localStorage:`, error);
-                setSaveError('Your browser may be out of storage space. Changes are not being saved.');
+                setSaveError('Your browser may be out of storage space. Consider exporting your data and clearing old projects.');
             }
         }
     }, [state.projects, state.activeItem, state.historyPast, state.historyFuture, state.isLoaded, user, loading, saveError]);
