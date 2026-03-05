@@ -7,7 +7,7 @@ import { handleGenerateTasks, handleGenerateProjectSummary, handleRephraseGoal, 
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, Pencil, ChevronRight, MessageSquare, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, LogOut, User, ImagePlus, RotateCw, RotateCcw, History } from 'lucide-react';
+import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, Pencil, ChevronRight, MessageSquare, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, LogOut, User, ImagePlus, RotateCw, RotateCcw, History, Lightbulb, ClipboardList } from 'lucide-react';
 import { Sidebar } from '@/components/sidebar';
 import { TreeViewWrapper as TreeView } from '@/components/tree-view';
 import { KanbanView } from '@/components/kanban-view';
@@ -166,6 +166,7 @@ export default function Home() {
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [descriptionText, setDescriptionText] = useState('');
   const [activeTab, setActiveTab] = useState('list');
+  const [activeSection, setActiveSection] = useState<'brainstorm' | 'plan'>('brainstorm');
   const [commentingTask, setCommentingTask] = useState<Task | null>(null);
   const [newCommentText, setNewCommentText] = useState('');
   const [executingTask, setExecutingTask] = useState<Task | null>(null);
@@ -296,6 +297,13 @@ export default function Home() {
     setAiConfirmationResponse(null);
     setIsEditingDescription(false);
   }, [activeProject]);
+
+  // Reset active tab when switching sections if current tab is not available
+  useEffect(() => {
+    if (!sectionViews[activeSection].includes(activeTab)) {
+      setActiveTab(sectionViews[activeSection][0]);
+    }
+  }, [activeSection]);
 
   const onFormSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -849,7 +857,14 @@ export default function Home() {
     'summary': { label: 'Summary', icon: FileText },
   };
 
-  const visibleViewOptions = Object.entries(viewOptions).filter(([, { hidden }]) => !hidden);
+  const sectionViews: Record<'brainstorm' | 'plan', string[]> = {
+    brainstorm: ['list', 'mindmap', 'execution', 'comments', 'summary'],
+    plan: ['list', 'kanban', 'execution', 'comments', 'summary'],
+  };
+
+  const visibleViewOptions = Object.entries(viewOptions).filter(
+    ([key, { hidden }]) => !hidden && sectionViews[activeSection].includes(key)
+  );
   
     // Human-readable preview for confirmation: pretty JSON
     const renderConfirmationJson = (data: any) => {
@@ -1092,6 +1107,35 @@ export default function Home() {
                 <div>
                      {isLoaded && activeProject && (
                         <div className="mb-4">
+                            {/* Section toggle: Brainstorm vs Plan */}
+                            <div className="flex items-center gap-2 mb-3">
+                                <div className="inline-flex h-9 items-center rounded-lg bg-muted p-1 text-muted-foreground">
+                                    <button
+                                        onClick={() => setActiveSection('brainstorm')}
+                                        className={cn(
+                                            "inline-flex items-center justify-center rounded-md px-3 py-1 text-sm font-medium transition-all",
+                                            activeSection === 'brainstorm'
+                                                ? "bg-background text-foreground shadow-sm"
+                                                : "hover:text-foreground"
+                                        )}
+                                    >
+                                        <Lightbulb className="mr-2 h-4 w-4" />
+                                        Brainstorm
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveSection('plan')}
+                                        className={cn(
+                                            "inline-flex items-center justify-center rounded-md px-3 py-1 text-sm font-medium transition-all",
+                                            activeSection === 'plan'
+                                                ? "bg-background text-foreground shadow-sm"
+                                                : "hover:text-foreground"
+                                        )}
+                                    >
+                                        <ClipboardList className="mr-2 h-4 w-4" />
+                                        Plan
+                                    </button>
+                                </div>
+                            </div>
                             {/* Tabs for larger screens */}
                             <div className="hidden md:block">
                                 <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -1239,6 +1283,7 @@ export default function Home() {
                                     sortOption={taskSortOption}
                                     onSetSortOption={setTaskSortOption}
                                     recentlyChanged={recentlyChanged}
+                                    planMode={activeSection === 'plan'}
                                                                                                             onOpenSubscopeDialog={(task, isRegen) => {
                                         // Open unified dialog pre-populated with the selected scope and mode
                                         setRefinedGoal(task.text);

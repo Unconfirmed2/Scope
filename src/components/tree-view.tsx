@@ -59,6 +59,8 @@ type TreeViewProps = {
     onOpenRephraseDialog: (task: Task) => void;
     /** Optional: Row-level change indicators to highlight new/updated items */
     recentlyChanged?: Record<string, { kind: 'new' | 'updated'; at: number }>;
+    /** When true, show status markers, checkboxes, and progress counts. When false (brainstorm mode), hide them. */
+    planMode?: boolean;
 };
 
 // Context for managing tree state
@@ -159,8 +161,9 @@ const TaskNode = ({
     onOpenSubscopeDialog,
     onOpenRephraseDialog,
     recentlyChanged,
-}: { 
-    task: Task, 
+    planMode,
+}: {
+    task: Task,
     level: number,
     allProjects: Project[],
     project: Project,
@@ -175,6 +178,7 @@ const TaskNode = ({
     onOpenSubscopeDialog: (task: Task, isRegeneration: boolean) => void;
     onOpenRephraseDialog: (task: Task) => void;
     recentlyChanged?: Record<string, { kind: 'new' | 'updated'; at: number }>;
+    planMode?: boolean;
 }) => {
   const { collapsedNodes, toggleNode } = useTreeState();
     const [isEditing, setIsEditing] = useState(false);
@@ -325,6 +329,7 @@ const TaskNode = ({
     >
       <div className="relative flex items-start pr-2" style={{ paddingLeft: `${level * 1.5}rem` }}>
           <div className="flex items-start gap-2 flex-grow">
+            {planMode && (
             <Checkbox
                 id={`select-${task.id}`}
                 checked={isSelected}
@@ -333,6 +338,7 @@ const TaskNode = ({
                 onClick={(e) => e.stopPropagation()}
                 onCheckedChange={() => onToggleSelection(task.id, false)}
             />
+            )}
             
             <div 
               className={cn("w-4 h-4 shrink-0 transition-transform flex items-center justify-center cursor-pointer mt-1", !hasSubtasks && "invisible")}
@@ -344,9 +350,11 @@ const TaskNode = ({
             </div>
             
             <div className="flex-grow flex items-start gap-2">
+                {planMode && (
                 <div className="flex items-center gap-2 pt-1 shrink-0">
                     {statusSelector}
                 </div>
+                )}
 
                                 {isEditing ? (
                   <Input
@@ -360,8 +368,8 @@ const TaskNode = ({
                 ) : (
                   <span 
                     className={cn(
-                      'flex-grow whitespace-normal break-words pt-0.5', 
-                      task.completed && 'line-through text-muted-foreground',
+                      'flex-grow whitespace-normal break-words pt-0.5',
+                      planMode && task.completed && 'line-through text-muted-foreground',
                       task.description && 'cursor-pointer hover:text-primary/80'
                     )}
                     onDoubleClick={() => setIsEditing(true)}
@@ -433,7 +441,7 @@ const TaskNode = ({
                     </DropdownMenuContent>
                 </DropdownMenu>
             </div>
-             {hasSubtasks && (
+             {planMode && hasSubtasks && (
               <span className="text-xs text-muted-foreground ml-auto self-start pt-1 shrink-0 group-hover/task:opacity-0 transition-opacity pointer-events-none">
                 ({subtaskCounts.completed}/{subtaskCounts.total})
               </span>
@@ -477,6 +485,7 @@ const TaskNode = ({
               onOpenSubscopeDialog={onOpenSubscopeDialog}
               onOpenRephraseDialog={onOpenRephraseDialog}
           recentlyChanged={recentlyChanged}
+              planMode={planMode}
             />
           ))}
         </div>
@@ -531,7 +540,7 @@ const TreeStateProvider = ({ children, tasks }: { children: React.ReactNode, tas
     );
 }
 
-export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSelectedTaskIds, onUpdateProject, onUpdateTaskAndPropagate, onMoveTask, onPromoteSubtask, onAddSubtask, onAddCommentClick, onExecuteClick, onDeleteTask, sortOption, onSetSortOption, onOpenSubscopeDialog, onOpenRephraseDialog, recentlyChanged }: TreeViewProps) {
+export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSelectedTaskIds, onUpdateProject, onUpdateTaskAndPropagate, onMoveTask, onPromoteSubtask, onAddSubtask, onAddCommentClick, onExecuteClick, onDeleteTask, sortOption, onSetSortOption, onOpenSubscopeDialog, onOpenRephraseDialog, recentlyChanged, planMode }: TreeViewProps) {
     const { toast } = useToast();
     const treeState = useContext(TreeStateContext);
     const lastClickedId = useRef<string | null>(null);
@@ -739,10 +748,12 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                     </Button>
                 </div>
                  <div className="flex items-center gap-2">
+                    {planMode && (
                     <Button variant="ghost" size="sm" onClick={handleSelectAllToggle} title={areAllSelected ? "Deselect All" : "Select All"}>
                         {areAllSelected ? <Square className="h-4 w-4" /> : <CheckSquare className="h-4 w-4" />}
                         {areAllSelected ? 'Deselect All' : 'Select All'}
                     </Button>
+                    )}
                     <Button variant="ghost" size="sm" onClick={handleToggleAll} title={allCollapsed ? "Expand All" : "Collapse All"}>
                     {allCollapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />} 
                     {allCollapsed ? 'Expand All' : 'Collapse All'}
@@ -750,7 +761,7 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                 </div>
             </div>
 
-            {selectedTaskIds.length > 0 && (
+            {planMode && selectedTaskIds.length > 0 && (
                 <div className="bg-accent/20 border border-accent/50 rounded-lg p-2 mb-2 flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold">{selectedTaskIds.length} scope(s) selected</p>
                     <div className="flex items-center gap-2">
@@ -838,6 +849,7 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                         onOpenRephraseDialog={onOpenRephraseDialog}
                         sortOption={sortOption}
                         recentlyChanged={recentlyChanged}
+                        planMode={planMode}
                     />
                 ))}
             </div>
