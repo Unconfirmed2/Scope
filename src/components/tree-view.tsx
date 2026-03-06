@@ -145,24 +145,25 @@ const AddSubtaskForm = ({ parentId, onAdd, onCancel, placeholder, isSibling }: {
 }
 
 
-const TaskNode = ({ 
-    task, 
-    level, 
+const TaskNode = ({
+    task,
+    level,
     allProjects,
     project,
     selectedTaskIds,
     onToggleSelection,
     onUpdateTask,
-    onDeleteTask, 
+    onDeleteTask,
     onAddSubtask,
     onAddCommentClick,
     onExecuteClick,
-    
+
     sortOption,
     onOpenSubscopeDialog,
     onOpenRephraseDialog,
     recentlyChanged,
     planMode,
+    numbered,
 }: {
     task: Task,
     level: number,
@@ -180,6 +181,7 @@ const TaskNode = ({
     onOpenRephraseDialog: (task: Task) => void;
     recentlyChanged?: Record<string, { kind: 'new' | 'updated'; at: number }>;
     planMode?: boolean;
+    numbered?: boolean;
 }) => {
   const { collapsedNodes, toggleNode } = useTreeState();
     const [isEditing, setIsEditing] = useState(false);
@@ -298,8 +300,14 @@ const TaskNode = ({
   };
 
   const handleCopyToClipboard = () => {
-    const opts: FormatTextOptions = { includeStatus: !!planMode, includeDescription: true };
-    const textToCopy = formatTaskToText(task, 0, opts);
+    const opts: FormatTextOptions = { numbered: !!numbered, includeStatus: !!planMode, includeDescription: true };
+    // Task itself is the root/title — numbering starts with its children
+    let textToCopy: string;
+    if (numbered && task.subtasks?.length) {
+      textToCopy = task.text + '\n' + formatTasksToText(task.subtasks, opts);
+    } else {
+      textToCopy = formatTaskToText(task, 0, opts);
+    }
     navigator.clipboard.writeText(textToCopy).then(() => {
         toast({ title: "Outline copied to clipboard!" });
     }, () => {
@@ -474,6 +482,7 @@ const TaskNode = ({
               onOpenRephraseDialog={onOpenRephraseDialog}
           recentlyChanged={recentlyChanged}
               planMode={planMode}
+              numbered={numbered}
             />
           ))}
         </div>
@@ -853,6 +862,7 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                         sortOption={sortOption}
                         recentlyChanged={recentlyChanged}
                         planMode={planMode}
+                        numbered={numbered}
                     />
                 ))}
             </div>
