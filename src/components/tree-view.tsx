@@ -3,7 +3,7 @@
 import { useState, useCallback, useContext, createContext, useRef, useEffect, useMemo } from 'react';
 import type { Project, Task, AIStep, TaskStatus, SortOption } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { BrainCircuit, Trash2, RotateCw, FolderSymlink, ChevronRight, MoreHorizontal, PlusCircle, MessageSquare, Pencil, Zap, ArrowUp, ArrowDown, ClipboardCopy, CheckSquare, Square, Wand2 } from 'lucide-react';
+import { BrainCircuit, Trash2, RotateCw, FolderSymlink, ChevronRight, MoreHorizontal, PlusCircle, MessageSquare, Pencil, Zap, ArrowUp, ArrowDown, ClipboardCopy, CheckSquare, Square, Wand2, ListOrdered, Copy } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 // import { handleGenerateTasks } from '@/app/actions';
 import { Button } from './ui/button';
@@ -11,7 +11,8 @@ import Linkify from 'linkify-react';
 import { Input } from './ui/input';
 // import { Textarea } from './ui/textarea';
 import { Checkbox } from './ui/checkbox';
-import { countDirectSubtasks, sortTasksShallow, findTaskRecursive } from '@/lib/utils';
+import { countDirectSubtasks, sortTasksShallow, findTaskRecursive, formatTaskToText, formatTasksToText } from '@/lib/utils';
+import type { FormatTextOptions } from '@/lib/utils';
 // Persona feature removed
 // Legacy dialog removed; unified dialog lives in page component
 import {
@@ -297,24 +298,11 @@ const TaskNode = ({
   };
 
   const handleCopyToClipboard = () => {
-    const formatTaskToString = (taskToFormat: Task, level: number): string => {
-        const indent = '  '.repeat(level);
-        const statusIcon = taskToFormat.status === 'done' ? '[x]' : '[ ]';
-        let output = `${indent}- ${statusIcon} ${taskToFormat.text}\n`;
-        
-        if (taskToFormat.description) {
-            const descriptionIndent = '  '.repeat(level + 1);
-            output += `${descriptionIndent}${taskToFormat.description.replace(/\n/g, `\n${descriptionIndent}`)}\n`;
-        }
-        if (taskToFormat.subtasks && taskToFormat.subtasks.length > 0) {
-            output += taskToFormat.subtasks.map(subtask => formatTaskToString(subtask, level + 1)).join('');
-        }
-        return output;
-    };
-    const textToCopy = formatTaskToString(task, 0);
+    const opts: FormatTextOptions = { includeStatus: !!planMode, includeDescription: true };
+    const textToCopy = formatTaskToText(task, 0, opts);
     navigator.clipboard.writeText(textToCopy).then(() => {
         toast({ title: "Outline copied to clipboard!" });
-    }, (err) => {
+    }, () => {
         toast({ variant: "destructive", title: "Failed to copy", description: "Could not copy text to clipboard." });
     });
   };
@@ -544,22 +532,7 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
     const { toast } = useToast();
     const treeState = useContext(TreeStateContext);
     const lastClickedId = useRef<string | null>(null);
-    // Legacy generation state removed
-
-    const formatTaskToString = useCallback((taskToFormat: Task, level: number): string => {
-        const indent = '  '.repeat(level);
-        const statusIcon = taskToFormat.status === 'done' ? '[x]' : '[ ]';
-        let output = `${indent}- ${statusIcon} ${taskToFormat.text}\n`;
-        
-        if (taskToFormat.description) {
-            const descriptionIndent = '  '.repeat(level + 1);
-            output += `${descriptionIndent}${taskToFormat.description.replace(/\n/g, `\n${descriptionIndent}`)}\n`;
-        }
-        if (taskToFormat.subtasks && taskToFormat.subtasks.length > 0) {
-            output += taskToFormat.subtasks.map(subtask => formatTaskToString(subtask, level + 1)).join('');
-        }
-        return output;
-    }, []);
+    const [numbered, setNumbered] = useState(false);
 
     const handleUpdateTask = useCallback((updatedTask: Task) => {
         onUpdateTaskAndPropagate(project.id, updatedTask);
@@ -747,7 +720,36 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                         {sortOption.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
                     </Button>
                 </div>
-                 <div className="flex items-center gap-2">
+                 <div className="flex items-center gap-1">
+                    <Tooltip><TooltipTrigger asChild>
+                        <Button
+                            variant={numbered ? "secondary" : "ghost"}
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setNumbered(n => !n)}
+                            title={numbered ? 'Switch to bullets' : 'Switch to numbering'}
+                        >
+                            <ListOrdered className="h-4 w-4" />
+                        </Button>
+                    </TooltipTrigger><TooltipContent><p>{numbered ? 'Switch to bullets' : 'Switch to numbering'}</p></TooltipContent></Tooltip>
+                    <Tooltip><TooltipTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => {
+                                const opts: FormatTextOptions = { numbered, includeStatus: !!planMode, includeDescription: true };
+                                const text = formatTasksToText(sortedTasks, opts);
+                                navigator.clipboard.writeText(text).then(
+                                    () => toast({ title: 'Outline copied to clipboard!' }),
+                                    () => toast({ variant: 'destructive', title: 'Failed to copy' }),
+                                );
+                            }}
+                            title="Copy all as text"
+                        >
+                            <Copy className="h-4 w-4" />
+                        </Button>
+                    </TooltipTrigger><TooltipContent><p>Copy all as text</p></TooltipContent></Tooltip>
                     {planMode && (
                     <Button variant="ghost" size="sm" onClick={handleSelectAllToggle} title={areAllSelected ? "Deselect All" : "Select All"}>
                         {areAllSelected ? <Square className="h-4 w-4" /> : <CheckSquare className="h-4 w-4" />}
@@ -755,7 +757,7 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                     </Button>
                     )}
                     <Button variant="ghost" size="sm" onClick={handleToggleAll} title={allCollapsed ? "Expand All" : "Collapse All"}>
-                    {allCollapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />} 
+                    {allCollapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
                     {allCollapsed ? 'Expand All' : 'Collapse All'}
                     </Button>
                 </div>
@@ -769,7 +771,8 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                             <DropdownMenuTrigger asChild><Button size="sm" variant="outline">Actions</Button></DropdownMenuTrigger>
                             <DropdownMenuContent>
                                 <DropdownMenuItem onClick={() => {
-                                    const text = selectedTasks.map(t => formatTaskToString(t, 0)).join('\n');
+                                    const opts: FormatTextOptions = { numbered, includeStatus: !!planMode, includeDescription: true };
+                                    const text = formatTasksToText(selectedTasks, opts);
                                     navigator.clipboard.writeText(text);
                                     toast({title: 'Copied selected outlines!'});
                                 }}>

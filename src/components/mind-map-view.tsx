@@ -3,10 +3,13 @@
 
 import type { Project, Task, TaskStatus } from '@/lib/types';
 import { useState, useRef, useEffect } from 'react';
-import { cn } from '@/lib/utils';
+import { cn, formatTasksToText } from '@/lib/utils';
+import type { FormatTextOptions } from '@/lib/utils';
 import { Button } from './ui/button';
 import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group';
-import { GitCommitHorizontal, GitCommitVertical, ZoomIn, ZoomOut } from 'lucide-react';
+import { GitCommitHorizontal, GitCommitVertical, ZoomIn, ZoomOut, Copy, ListOrdered } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 
 type MindMapProps = {
     project: Project;
@@ -88,7 +91,9 @@ const MindMapNode = ({
 export function MindMapView({ project, activeTask, onItemSelect }: MindMapProps) {
     const [layout, setLayout] = useState<'vertical' | 'horizontal'>('vertical');
     const [scale, setScale] = useState(1);
+    const [numbered, setNumbered] = useState(false);
     const mapRef = useRef<HTMLDivElement>(null);
+    const { toast } = useToast();
     
     const rootTask: Task = activeTask ? activeTask : {
         id: project.id,
@@ -111,9 +116,38 @@ export function MindMapView({ project, activeTask, onItemSelect }: MindMapProps)
         setScale(Math.max(0.2, Math.min(newScale, 2))); // Clamp scale between 0.2 and 2
     };
 
+    const tasksToFormat = activeTask ? [activeTask] : project.tasks;
+
+    const handleCopy = () => {
+        const opts: FormatTextOptions = { numbered, includeDescription: true };
+        const text = formatTasksToText(tasksToFormat, opts);
+        navigator.clipboard.writeText(text).then(
+            () => toast({ title: 'Mind map copied to clipboard!' }),
+            () => toast({ variant: 'destructive', title: 'Failed to copy' }),
+        );
+    };
+
     return (
+        <TooltipProvider>
         <div className="p-4 bg-card rounded-lg border overflow-auto relative" ref={mapRef} onWheel={handleWheelZoom}>
             <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
+                <div className="flex items-center gap-1 rounded-md border bg-background p-1">
+                    <Tooltip><TooltipTrigger asChild>
+                        <Button
+                            variant={numbered ? "secondary" : "ghost"}
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setNumbered(n => !n)}
+                        >
+                            <ListOrdered className="h-4 w-4" />
+                        </Button>
+                    </TooltipTrigger><TooltipContent><p>{numbered ? 'Switch to bullets' : 'Switch to numbering'}</p></TooltipContent></Tooltip>
+                    <Tooltip><TooltipTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleCopy}>
+                            <Copy className="h-4 w-4" />
+                        </Button>
+                    </TooltipTrigger><TooltipContent><p>Copy as text</p></TooltipContent></Tooltip>
+                </div>
                  <ToggleGroup 
                     type="single" 
                     value={layout} 
@@ -157,5 +191,6 @@ export function MindMapView({ project, activeTask, onItemSelect }: MindMapProps)
                 </div>
             )}
         </div>
+        </TooltipProvider>
     );
 }

@@ -10,6 +10,8 @@ import {
   findTaskRecursive,
   scanDependencies,
   countCommentsRecursively,
+  formatTaskToText,
+  formatTasksToText,
 } from '@/lib/utils';
 import type { Task, Project, SortOption, Comment } from '@/lib/types';
 
@@ -288,5 +290,82 @@ describe('countCommentsRecursively', () => {
     ];
     // 1 comment + 1 reply + 1 comment on subtask = 3
     expect(countCommentsRecursively(tasks)).toBe(3);
+  });
+});
+
+// ── formatTaskToText / formatTasksToText ──────────────────────────
+
+describe('formatTaskToText', () => {
+  it('uses tab indentation for nested tasks', () => {
+    const child = makeTask({ id: 'c1', text: 'Child' });
+    const parent = makeTask({ id: 'p1', text: 'Parent', subtasks: [child] });
+    const result = formatTaskToText(parent, 0, {});
+    expect(result).toBe('- Parent\n\t- Child\n');
+  });
+
+  it('includes outline numbering when numbered is true', () => {
+    const child1 = makeTask({ id: 'c1', text: 'First' });
+    const child2 = makeTask({ id: 'c2', text: 'Second' });
+    const parent = makeTask({ id: 'p1', text: 'Root', subtasks: [child1, child2] });
+    const result = formatTaskToText(parent, 0, { numbered: true });
+    expect(result).toContain('1. Root');
+    expect(result).toContain('\t1.1. First');
+    expect(result).toContain('\t1.2. Second');
+  });
+
+  it('includes status markers when includeStatus is true', () => {
+    const done = makeTask({ id: 'd', text: 'Done Task', status: 'done' });
+    const todo = makeTask({ id: 't', text: 'Todo Task', status: 'todo' });
+    const doneText = formatTaskToText(done, 0, { includeStatus: true });
+    const todoText = formatTaskToText(todo, 0, { includeStatus: true });
+    expect(doneText).toContain('[x]');
+    expect(todoText).toContain('[ ]');
+  });
+
+  it('omits status markers when includeStatus is false', () => {
+    const task = makeTask({ id: 't', text: 'Task', status: 'done' });
+    const result = formatTaskToText(task, 0, {});
+    expect(result).not.toContain('[x]');
+    expect(result).not.toContain('[ ]');
+  });
+
+  it('includes description when includeDescription is true', () => {
+    const task = makeTask({ id: 't', text: 'Task', description: 'A description' });
+    const result = formatTaskToText(task, 0, { includeDescription: true });
+    expect(result).toContain('\tA description');
+  });
+
+  it('indents deeply nested items with multiple tabs', () => {
+    const grandchild = makeTask({ id: 'gc', text: 'Grandchild' });
+    const child = makeTask({ id: 'c', text: 'Child', subtasks: [grandchild] });
+    const parent = makeTask({ id: 'p', text: 'Parent', subtasks: [child] });
+    const result = formatTaskToText(parent, 0, {});
+    expect(result).toBe('- Parent\n\t- Child\n\t\t- Grandchild\n');
+  });
+
+  it('generates correct outline numbers for deep nesting', () => {
+    const gc = makeTask({ id: 'gc', text: 'GC' });
+    const c = makeTask({ id: 'c', text: 'C', subtasks: [gc] });
+    const root = makeTask({ id: 'r', text: 'R', subtasks: [c] });
+    const result = formatTaskToText(root, 0, { numbered: true });
+    expect(result).toContain('1. R');
+    expect(result).toContain('\t1.1. C');
+    expect(result).toContain('\t\t1.1.1. GC');
+  });
+});
+
+describe('formatTasksToText', () => {
+  it('formats multiple root tasks with correct numbering', () => {
+    const t1 = makeTask({ id: 't1', text: 'Alpha' });
+    const t2 = makeTask({ id: 't2', text: 'Beta' });
+    const result = formatTasksToText([t1, t2], { numbered: true });
+    expect(result).toBe('1. Alpha\n2. Beta\n');
+  });
+
+  it('formats multiple root tasks with bullets', () => {
+    const t1 = makeTask({ id: 't1', text: 'Alpha' });
+    const t2 = makeTask({ id: 't2', text: 'Beta' });
+    const result = formatTasksToText([t1, t2], {});
+    expect(result).toBe('- Alpha\n- Beta\n');
   });
 });
