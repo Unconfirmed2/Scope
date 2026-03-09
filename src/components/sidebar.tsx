@@ -113,6 +113,10 @@ const SidebarTask = ({
               e.stopPropagation();
               onItemSelect({ projectId: project.id, taskId: task.id })
             }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              setEditingTaskId(task.id);
+            }}
           >
             <ChevronRight 
               className={cn("h-4 w-4 shrink-0 transition-transform cursor-pointer", 
@@ -191,10 +195,17 @@ const SidebarTask = ({
           </div>
           
            {hasSubtasks && (
-             <div className="w-full flex items-center gap-2 pl-5 pr-2">
-                <Progress value={taskProgress} className="h-1 flex-grow" />
-                <span className="text-xs text-muted-foreground shrink-0">{subtaskCounts.completed}/{subtaskCounts.total}</span>
-            </div>
+             <Tooltip>
+               <TooltipTrigger asChild>
+                 <div className="w-full flex items-center gap-2 pl-5 pr-2">
+                    <Progress value={taskProgress} className="h-1 flex-grow" />
+                    <span className="text-xs text-muted-foreground shrink-0">{subtaskCounts.completed}/{subtaskCounts.total}</span>
+                 </div>
+               </TooltipTrigger>
+               <TooltipContent>
+                 <p>{subtaskCounts.completed} of {subtaskCounts.total} sub-scopes completed ({Math.round(taskProgress)}%)</p>
+               </TooltipContent>
+             </Tooltip>
           )}
       </div>
       {!isCollapsed && hasSubtasks && (
@@ -411,6 +422,7 @@ export function Sidebar({
             <div key={project.id} className="rounded-md bg-transparent group/project">
               <div
                 onClick={() => !isEditing && onItemSelect({ projectId: project.id, taskId: null })}
+                onDoubleClick={() => { if (!isUnassigned) setEditingProjectId(project.id); }}
                 className={cn(
                   "flex flex-col group p-2 rounded-md hover:bg-accent/20 cursor-pointer",
                    isProjectActive && !isEditing && "bg-background/50"
@@ -488,10 +500,17 @@ export function Sidebar({
                     </div>
                 </div>
 
-                 <div className="w-full pl-5 pr-2 mt-1">
-                      <Progress value={progress} className="h-1" />
-                      <span className="text-xs text-muted-foreground">{taskCounts.completed}/{taskCounts.total} scopes</span>
-                  </div>
+                 <Tooltip>
+                   <TooltipTrigger asChild>
+                     <div className="w-full pl-5 pr-2 mt-1">
+                          <Progress value={progress} className="h-1" />
+                          <span className="text-xs text-muted-foreground">{taskCounts.completed}/{taskCounts.total} scopes</span>
+                      </div>
+                   </TooltipTrigger>
+                   <TooltipContent>
+                     <p>{taskCounts.completed} of {taskCounts.total} scopes completed ({Math.round(progress)}%)</p>
+                   </TooltipContent>
+                 </Tooltip>
               </div>
               {!isCollapsed && (
                 <div className="pl-2 pr-2 py-1 space-y-1 min-h-[10px]">

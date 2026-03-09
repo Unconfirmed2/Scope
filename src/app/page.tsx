@@ -7,7 +7,7 @@ import { handleGenerateTasks, handleGenerateProjectSummary, handleRephraseGoal, 
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, Pencil, ChevronRight, MessageSquare, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, LogOut, User, ImagePlus, RotateCw, RotateCcw, History, Lightbulb, ClipboardList } from 'lucide-react';
+import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, Pencil, ChevronRight, MessageSquare, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, LogOut, User, ImagePlus, RotateCw, RotateCcw, History, Lightbulb, ClipboardList, Search, Download, Upload, Filter } from 'lucide-react';
 import { Sidebar } from '@/components/sidebar';
 import { TreeViewWrapper as TreeView } from '@/components/tree-view';
 import { KanbanView } from '@/components/kanban-view';
@@ -18,6 +18,7 @@ import { ExecutionView } from '@/components/execution-view';
 import { AuthDialog } from '@/components/auth-dialog';
 import { SettingsDialog } from '@/components/settings-dialog';
 import { HistoryDialog } from '@/components/history-dialog';
+import { SearchModal } from '@/components/search-modal';
 import { HelpDialog } from '@/components/help-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from '@/components/ui/textarea';
@@ -190,13 +191,21 @@ export default function Home() {
     const isRefineMode = useMemo(() => Boolean(confirmationInput.trim() || confirmationImage), [confirmationInput, confirmationImage]);
     // Unified confirmation dialog mode
         const [confirmationMode, setConfirmationMode] = useState<{ type: 'initial' | 'subscope' | 'regenerate' | 'alternative'; targetTaskId?: string }>({ type: 'initial' });
+    const [generationStep, setGenerationStep] = useState<string | null>(null);
 
-    // Keyboard shortcuts: Undo/Redo
+    const [isSearchOpen, setIsSearchOpen] = useState(false);
+    const [statusFilter, setStatusFilter] = useState<'all' | 'todo' | 'inprogress' | 'done'>('all');
+    const [sourceFilter, setSourceFilter] = useState<'all' | 'ai' | 'manual'>('all');
+
+    // Keyboard shortcuts: Undo/Redo + Search
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
             const isMac = navigator.platform.toUpperCase().includes('MAC');
             const mod = isMac ? e.metaKey : e.ctrlKey;
-            if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+            if (mod && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                setIsSearchOpen(true);
+            } else if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
                 e.preventDefault();
                 if (canUndo) undo();
             } else if ((mod && e.key.toLowerCase() === 'y') || (mod && e.shiftKey && e.key.toLowerCase() === 'z')) {
@@ -410,6 +419,7 @@ export default function Home() {
             // No feedback: now generate based on mode
             if (confirmationMode.type === 'initial') {
                 const finalGoal = refinedGoal || goal;
+                setGenerationStep('Generating scope breakdown...');
                 toast({ title: 'Generating scopes...' });
                 const gen = await handleGenerateTasks({
                     goal: finalGoal,
@@ -474,6 +484,7 @@ export default function Home() {
                 const toMinimal = (tasks: Task[]): MinimalNode[] => tasks.map(t => ({ id: t.id, text: t.text, description: t.description, children: t.subtasks ? toMinimal(t.subtasks) : [] }));
                 const minimalProject = { name: targetProject.name, tasks: toMinimal(targetProject.tasks) };
 
+                setGenerationStep('Creating alternative and assessing dependencies...');
                 toast({ title: 'Creating alternative and assessing related updates...' });
                 const alt = await handleGenerateAlternativeScope({
                     selectedNode: { id: parentTask.id, text: parentTask.text, description: parentTask.description, subtasks: parentTask.subtasks?.map(st => ({ text: st.text, description: st.description, subtasks: st.subtasks?.length ? [{}] : undefined })) },
@@ -629,6 +640,7 @@ export default function Home() {
                     return;
                 }
                 const finalParentText = refinedGoal || parentTask.text;
+                setGenerationStep(confirmationMode.type === 'regenerate' ? 'Regenerating sub-scopes...' : 'Generating sub-scopes...');
                 toast({ title: confirmationMode.type === 'regenerate' ? 'Regenerating sub-scopes...' : 'Generating sub-scopes...' });
                 const existingSubtaskNames = (parentTask.subtasks || []).map(t => t.text);
                 const imageContext = (confirmationImage ? (confirmationImage as any).dataUri : undefined) ?? (goalImage ? (goalImage as any).dataUri : undefined);
@@ -689,6 +701,7 @@ export default function Home() {
         toast({ variant: 'destructive', title: 'An unexpected error occurred', description: errorMessage });
     } finally {
         setIsGenerating(false);
+        setGenerationStep(null);
     }
   };
 
@@ -909,6 +922,62 @@ export default function Home() {
       toast({ title: 'Exporting project...', description: `"${project.name}" is being prepared for download.` });
   };
 
+  const handleExportJson = () => {
+    if (!activeProject) return;
+    const data = JSON.stringify(activeProject, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    saveAs(blob, `${activeProject.name}.json`);
+    toast({ title: 'Exported as JSON' });
+  };
+
+  const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const imported = JSON.parse(ev.target?.result as string) as Project;
+        if (!imported.name || !imported.tasks) {
+          toast({ variant: 'destructive', title: 'Invalid JSON', description: 'The file does not contain a valid project.' });
+          return;
+        }
+        // Create as new project with fresh ID
+        const newId = createProject(imported.name);
+        if (newId) {
+          const newProject = projects.find(p => p.id === newId);
+          if (newProject) {
+            updateProject({ ...newProject, tasks: imported.tasks, description: imported.description });
+            setActiveItem({ projectId: newId, taskId: null });
+            toast({ title: `Imported "${imported.name}"` });
+          }
+        }
+      } catch {
+        toast({ variant: 'destructive', title: 'Import failed', description: 'Could not parse the JSON file.' });
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const jsonImportRef = useRef<HTMLInputElement>(null);
+
+  // Filter tasks by status and source
+  const filterTasks = useCallback((tasks: Task[]): Task[] => {
+    return tasks.reduce<Task[]>((acc, task) => {
+      const statusMatch = statusFilter === 'all' || task.status === statusFilter;
+      const sourceMatch = sourceFilter === 'all' || task.source === sourceFilter;
+      const filteredSubtasks = task.subtasks?.length ? filterTasks(task.subtasks) : [];
+      if (statusMatch && sourceMatch) {
+        acc.push({ ...task, subtasks: filteredSubtasks });
+      } else if (filteredSubtasks.length > 0) {
+        acc.push({ ...task, subtasks: filteredSubtasks });
+      }
+      return acc;
+    }, []);
+  }, [statusFilter, sourceFilter]);
+
+  const hasActiveFilters = statusFilter !== 'all' || sourceFilter !== 'all';
+
   if (authLoading && !isLoaded) {
     return (
         <div className="flex h-screen w-full items-center justify-center bg-background">
@@ -1034,6 +1103,11 @@ export default function Home() {
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm" className="h-8 gap-2 text-muted-foreground" onClick={() => setIsSearchOpen(true)} title="Search (Ctrl+K)">
+                            <Search className="h-4 w-4" />
+                            <span className="hidden sm:inline">Search</span>
+                            <kbd className="hidden sm:inline-flex h-5 items-center gap-1 rounded border bg-muted px-1.5 text-[10px] font-medium">⌘K</kbd>
+                        </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => undo()} disabled={!canUndo} title="Undo (Ctrl+Z)">
                             <RotateCcw className="h-4 w-4" />
                         </Button>
@@ -1134,6 +1208,44 @@ export default function Home() {
                                         <ClipboardList className="mr-2 h-4 w-4" />
                                         Plan
                                     </button>
+                                </div>
+                            </div>
+                            {/* Toolbar: filters + import/export */}
+                            <div className="flex items-center gap-2 mb-3 flex-wrap">
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button variant="outline" size="sm" className={cn("h-8 gap-1", hasActiveFilters && "border-primary text-primary")}>
+                                            <Filter className="h-3.5 w-3.5" />
+                                            Filter
+                                            {hasActiveFilters && <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">ON</Badge>}
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="start">
+                                        <DropdownMenuLabel>Status</DropdownMenuLabel>
+                                        {(['all', 'todo', 'inprogress', 'done'] as const).map(s => (
+                                            <DropdownMenuItem key={s} onClick={() => setStatusFilter(s)} className={cn(statusFilter === s && "font-semibold bg-accent")}>
+                                                {s === 'all' ? 'All' : s === 'todo' ? 'To Do' : s === 'inprogress' ? 'In Progress' : 'Done'}
+                                            </DropdownMenuItem>
+                                        ))}
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuLabel>Source</DropdownMenuLabel>
+                                        {(['all', 'ai', 'manual'] as const).map(s => (
+                                            <DropdownMenuItem key={s} onClick={() => setSourceFilter(s)} className={cn(sourceFilter === s && "font-semibold bg-accent")}>
+                                                {s === 'all' ? 'All' : s === 'ai' ? 'AI Generated' : 'Manual'}
+                                            </DropdownMenuItem>
+                                        ))}
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                                <div className="ml-auto flex items-center gap-1">
+                                    <input type="file" ref={jsonImportRef} className="hidden" accept=".json" onChange={handleImportJson} />
+                                    <Button variant="ghost" size="sm" className="h-8 gap-1" onClick={() => jsonImportRef.current?.click()} title="Import JSON">
+                                        <Upload className="h-3.5 w-3.5" />
+                                        <span className="hidden sm:inline">Import</span>
+                                    </Button>
+                                    <Button variant="ghost" size="sm" className="h-8 gap-1" onClick={handleExportJson} disabled={!activeProject} title="Export JSON">
+                                        <Download className="h-3.5 w-3.5" />
+                                        <span className="hidden sm:inline">Export</span>
+                                    </Button>
                                 </div>
                             </div>
                             {/* Tabs for larger screens */}
@@ -1250,8 +1362,8 @@ export default function Home() {
                                 ))}
                             </TabsList>
                             <TabsContent value="list">
-                                <TreeView 
-                                    tasks={activeTask ? [activeTask] : activeProject.tasks}
+                                <TreeView
+                                    tasks={filterTasks(activeTask ? [activeTask] : activeProject.tasks)}
                                     project={activeProject}
                                     allProjects={projects}
                                     selectedTaskIds={selectedTaskIds}
@@ -1406,10 +1518,24 @@ export default function Home() {
                         <div className="text-center text-muted-foreground mt-16 border-2 border-dashed rounded-lg p-12">
                         {isLoaded ? (
                             <>
-                                <h3 className='text-xl font-semibold mb-2'>Welcome to Scope</h3>
-                                <p className="mb-4">Scope out. Dive Deep. Complete.</p>
-                                <p>Select a folder from the sidebar to view its scopes.</p>
-                                <p className='mt-2'>Or, type a new scope above to get started!</p>
+                                <Lightbulb className="mx-auto h-10 w-10 mb-4 text-primary/50" />
+                                <h3 className='text-xl font-semibold mb-2 text-foreground'>Welcome to Scope</h3>
+                                <p className="mb-4">Break down any idea into structured, actionable pieces.</p>
+                                <div className="flex flex-col gap-2 max-w-xs mx-auto text-sm">
+                                    <p>1. Select or create a folder from the sidebar</p>
+                                    <p>2. Type a goal above and let AI decompose it</p>
+                                    <p>3. Explore, execute, and synthesize</p>
+                                </div>
+                                <div className="mt-4 flex justify-center gap-2">
+                                    <Button variant="outline" size="sm" onClick={() => setIsSidebarOpen(true)}>
+                                        <LayoutPanelLeft className="mr-2 h-4 w-4" />
+                                        Open Sidebar
+                                    </Button>
+                                    <Button variant="outline" size="sm" onClick={() => setIsSearchOpen(true)}>
+                                        <Search className="mr-2 h-4 w-4" />
+                                        Search Scopes
+                                    </Button>
+                                </div>
                             </>
                         ) : (
                             <>
@@ -1421,6 +1547,24 @@ export default function Home() {
                     )}
                 </div>
             </main>
+            {/* Mobile bottom tab bar */}
+            {isLoaded && activeProject && (
+              <nav className="md:hidden border-t bg-background flex items-center justify-around py-1 px-1 shrink-0">
+                {visibleViewOptions.map(([key, { label, icon: Icon }]) => (
+                  <button
+                    key={key}
+                    onClick={() => setActiveTab(key)}
+                    className={cn(
+                      "flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] rounded-md transition-colors",
+                      activeTab === key ? "text-primary bg-primary/10" : "text-muted-foreground"
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {label.split(' ')[0]}
+                  </button>
+                ))}
+              </nav>
+            )}
         </div>
         <HelpDialog open={isHelpOpen} onOpenChange={setIsHelpOpen} />
         <AuthDialog open={isAuthDialogOpen} onOpenChange={setIsAuthDialogOpen} />
@@ -1551,6 +1695,12 @@ export default function Home() {
                         )}
                     </div>
                 </div>
+                                                {generationStep && (
+                                                    <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse mt-2">
+                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                        <span>{generationStep}</span>
+                                                    </div>
+                                                )}
                                                 <DialogFooter className="mt-4">
                                                         <Button variant="ghost" onClick={() => setIsConfirmationDialogOpen(false)}>Cancel</Button>
                                                         {isRefineMode ? (
@@ -1603,6 +1753,15 @@ export default function Home() {
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+        <SearchModal
+          open={isSearchOpen}
+          onOpenChange={setIsSearchOpen}
+          projects={projects}
+          onSelect={(sel) => {
+            setActiveItem(sel);
+            setIsSearchOpen(false);
+          }}
+        />
     </div>
     </TooltipProvider>
   );
