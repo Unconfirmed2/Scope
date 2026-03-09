@@ -7,7 +7,7 @@ import { handleGenerateTasks, handleGenerateProjectSummary, handleRephraseGoal, 
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, Pencil, ChevronRight, MessageSquare, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, LogOut, User, ImagePlus, RotateCw, RotateCcw, History, Lightbulb, ClipboardList, Search, Download, Upload, Filter } from 'lucide-react';
+import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, Pencil, ChevronRight, MessageSquare, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, LogOut, User, ImagePlus, RotateCw, RotateCcw, History, Lightbulb, ClipboardList, Search, Download, Upload, Filter, X } from 'lucide-react';
 import { Sidebar } from '@/components/sidebar';
 import { TreeViewWrapper as TreeView } from '@/components/tree-view';
 import { KanbanView } from '@/components/kanban-view';
@@ -193,6 +193,28 @@ export default function Home() {
         const [confirmationMode, setConfirmationMode] = useState<{ type: 'initial' | 'subscope' | 'regenerate' | 'alternative'; targetTaskId?: string }>({ type: 'initial' });
     const [generationStep, setGenerationStep] = useState<string | null>(null);
 
+    // Cancellation: each generation gets a unique ID; cancel invalidates it
+    const generationIdRef = useRef(0);
+    const isCancelledRef = useRef(false);
+
+    const startGeneration = useCallback(() => {
+        generationIdRef.current += 1;
+        isCancelledRef.current = false;
+        setIsGenerating(true);
+        return generationIdRef.current;
+    }, []);
+
+    const cancelGeneration = useCallback(() => {
+        isCancelledRef.current = true;
+        setIsGenerating(false);
+        setGenerationStep(null);
+        toast({ title: 'Generation cancelled' });
+    }, [toast]);
+
+    const isStale = useCallback((id: number) => {
+        return id !== generationIdRef.current || isCancelledRef.current;
+    }, []);
+
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [statusFilter, setStatusFilter] = useState<'all' | 'todo' | 'inprogress' | 'done'>('all');
     const [sourceFilter, setSourceFilter] = useState<'all' | 'ai' | 'manual'>('all');
@@ -326,7 +348,8 @@ export default function Home() {
         return;
     }
 
-    setIsGenerating(true);
+    const genId = startGeneration();
+    setGenerationStep('Clarifying scope...');
 
     try {
         toast({ title: 'Clarifying scope...', description: 'AI is rephrasing for clarity.' });
@@ -337,6 +360,7 @@ export default function Home() {
             existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
             photoDataUri: goalImage?.dataUri,
         });
+        if (isStale(genId)) return;
         if (!result.success || !result.data) {
             toast({ variant: 'destructive', title: 'Rephrase Failed', description: result.error || 'The AI could not rephrase the scope.' });
             return;
@@ -347,16 +371,20 @@ export default function Home() {
     setConfirmationMode({ type: 'initial' });
 
     } catch (error) {
+        if (isStale(genId)) return;
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred during generation.';
         toast({ variant: 'destructive', title: 'An unexpected error occurred', description: errorMessage });
     } finally {
-        setIsGenerating(false);
+        if (!isStale(genId)) {
+            setIsGenerating(false);
+            setGenerationStep(null);
+        }
     }
   };
 
   const handleAcceptConfirmation = async () => {
     if (!isLoaded) return;
-  
+
     const targetProjectId = activeProjectId || 'unassigned';
     const targetProject = projects.find(p => p.id === targetProjectId);
 
@@ -364,8 +392,8 @@ export default function Home() {
         toast({ variant: 'destructive', title: 'Error', description: 'Could not find a folder to add the scope to.' });
         return;
     }
-  
-    setIsGenerating(true);
+
+    const genId = startGeneration();
     // Keep dialog open during some flows to allow follow-ups; we will close it explicitly per-branch
   
     try {
@@ -374,6 +402,7 @@ export default function Home() {
             // If user provided feedback, refine the goal only (do not generate tasks yet)
             const hasNewInput = confirmationInput.trim() || confirmationImage;
             if (hasNewInput) {
+                setGenerationStep('Refining scope...');
                 toast({ title: 'Refining scope...' });
                 const res = await handleRephraseGoal({
                     goal: refinedGoal || goal,
@@ -382,6 +411,7 @@ export default function Home() {
                     existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
                     photoDataUri: confirmationImage?.dataUri || goalImage?.dataUri,
                 });
+                if (isStale(genId)) return;
                 if (!res.success || !res.data) {
                     toast({ variant: 'destructive', title: 'Refine Failed', description: res.error || 'The AI could not refine the scope.' });
                     setIsGenerating(false);
@@ -427,6 +457,7 @@ export default function Home() {
                     existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
                     photoDataUri: goalImage?.dataUri,
                 });
+                if (isStale(genId)) return;
                 if (!gen.success || !gen.data) {
                     toast({ variant: 'destructive', title: 'AI Generation Failed', description: gen.error || 'The AI did not return a valid structure.' });
                     setIsGenerating(false);
@@ -497,6 +528,7 @@ export default function Home() {
                     fullProjectJson: minimalProject,
                     trimmedContext: undefined,
                 });
+                if (isStale(genId)) return;
 
                 if (!alt.success || !alt.data) {
                     toast({ variant: 'destructive', title: 'AI Failed', description: alt.error || 'Could not create an alternative.' });
@@ -650,6 +682,7 @@ export default function Home() {
                     existingTasks: isUnassigned ? [] : existingSubtaskNames,
                     photoDataUri: imageContext,
                 });
+                if (isStale(genId)) return;
                 if (!gen.success || !gen.data) {
                     toast({ variant: 'destructive', title: 'AI Generation Failed', description: gen.error || 'The AI did not return a valid structure.' });
                     setIsGenerating(false);
@@ -697,11 +730,14 @@ export default function Home() {
     setConfirmationMode({ type: 'initial' });
 
     } catch (error) {
+        if (isStale(genId)) return;
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred during generation.';
         toast({ variant: 'destructive', title: 'An unexpected error occurred', description: errorMessage });
     } finally {
-        setIsGenerating(false);
-        setGenerationStep(null);
+        if (!isStale(genId)) {
+            setIsGenerating(false);
+            setGenerationStep(null);
+        }
     }
   };
 
@@ -834,22 +870,33 @@ export default function Home() {
     setExecutionInput('');
   };
 
+  const [isExecuting, setIsExecuting] = useState(false);
+
   const handleExecuteTask = async () => {
     if (executingTask && activeProject) {
+      const genId = startGeneration();
+      setIsExecuting(true);
+      setGenerationStep('Executing scope...');
+
       const isUnassigned = activeProject.id === 'unassigned';
       const taskPath = findTaskPath(activeProject.tasks, executingTask.id);
       const parentTask = taskPath.length > 1 ? taskPath[taskPath.length - 2] : null;
       const siblingTasks = parentTask ? parentTask.subtasks : activeProject.tasks;
       const otherTasks = isUnassigned ? [] : siblingTasks.map(t => t.text).filter(t => t !== executingTask.text);
-      
+
       const success = await executeTask(
-          activeProject.id, 
-          executingTask.id, 
+          activeProject.id,
+          executingTask.id,
           executingTask.text,
           executionInput,
           isUnassigned ? undefined : activeProject.name,
           otherTasks
       );
+
+      setIsExecuting(false);
+      if (isStale(genId)) return;
+      setIsGenerating(false);
+      setGenerationStep(null);
 
       if (success) {
           toast({ title: 'Scope executed!', description: 'The results have been added to the Execution tab.', variant: 'default' });
@@ -1297,16 +1344,25 @@ export default function Home() {
 
                             />
                              <div className="flex w-full md:w-auto items-center justify-end gap-2 flex-shrink-0">
-                                <Button size="icon" type="submit" disabled={isGenerating || !goal.trim() || !isLoaded}>
-                                    {isGenerating ? <Loader2 className="animate-spin" /> : <Plus />}
-                                </Button>
-                                <Button size="icon" type="button" onClick={() => fileInputRef.current?.click()} disabled={isGenerating}>
-                                    <ImagePlus />
-                                </Button>
-                                <Button onClick={handleCreateManualTemplate} disabled={!isLoaded}>
-                                    <FilePlus2 />
-                                    <span>Blank Template</span>
-                                </Button>
+                                {isGenerating ? (
+                                    <Button size="sm" variant="destructive" type="button" onClick={cancelGeneration}>
+                                        <X className="mr-1 h-4 w-4" />
+                                        Cancel
+                                    </Button>
+                                ) : (
+                                    <>
+                                        <Button size="icon" type="submit" disabled={!goal.trim() || !isLoaded}>
+                                            <Plus />
+                                        </Button>
+                                        <Button size="icon" type="button" onClick={() => fileInputRef.current?.click()}>
+                                            <ImagePlus />
+                                        </Button>
+                                        <Button onClick={handleCreateManualTemplate} disabled={!isLoaded}>
+                                            <FilePlus2 />
+                                            <span>Blank Template</span>
+                                        </Button>
+                                    </>
+                                )}
                              </div>
                         </div>
                         <input
@@ -1330,6 +1386,17 @@ export default function Home() {
                             </div>
                         )}
                     </form>
+
+                    {isGenerating && generationStep && !isConfirmationDialogOpen && !executingTask && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4 p-3 rounded-lg border bg-muted/50 animate-pulse">
+                            <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                            <span className="flex-grow">{generationStep}</span>
+                            <Button variant="ghost" size="sm" className="h-7 text-destructive hover:text-destructive" onClick={cancelGeneration}>
+                                <X className="h-4 w-4 mr-1" />
+                                Cancel
+                            </Button>
+                        </div>
+                    )}
 
                     {isLoaded && activeProject ? (
                         <div className="flex items-center text-sm text-muted-foreground mb-4 flex-wrap">
@@ -1605,12 +1672,27 @@ export default function Home() {
                     placeholder="e.g., 'Focus on solutions for a small business' or 'Provide code examples in Python'."
                     rows={4}
                 />
+                {isExecuting && generationStep && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>{generationStep}</span>
+                    </div>
+                )}
                 <DialogFooter>
-                    <Button variant="ghost" onClick={handleCloseExecuteDialog}>Cancel</Button>
-                    <Button onClick={handleExecuteTask}>
-                        <Zap className="mr-2"/>
-                        Execute
-                    </Button>
+                    {isExecuting ? (
+                        <Button variant="destructive" onClick={() => { cancelGeneration(); setIsExecuting(false); handleCloseExecuteDialog(); }}>
+                            <X className="mr-1 h-4 w-4" />
+                            Stop execution
+                        </Button>
+                    ) : (
+                        <>
+                            <Button variant="ghost" onClick={handleCloseExecuteDialog}>Cancel</Button>
+                            <Button onClick={handleExecuteTask}>
+                                <Zap className="mr-2"/>
+                                Execute
+                            </Button>
+                        </>
+                    )}
                 </DialogFooter>
             </DialogContent>
         </Dialog>
@@ -1702,25 +1784,32 @@ export default function Home() {
                                                     </div>
                                                 )}
                                                 <DialogFooter className="mt-4">
-                                                        <Button variant="ghost" onClick={() => setIsConfirmationDialogOpen(false)}>Cancel</Button>
-                                                        {isRefineMode ? (
-                                                            <Button onClick={handleAcceptConfirmation} disabled={isGenerating}>
-                                                                {isGenerating ? <Loader2 className="animate-spin" /> : 'Refine scope'}
+                                                        {isGenerating ? (
+                                                            <Button variant="destructive" onClick={cancelGeneration}>
+                                                                <X className="mr-1 h-4 w-4" />
+                                                                Stop generation
                                                             </Button>
                                                         ) : (
-                                                            <Button onClick={handleAcceptConfirmation} disabled={isGenerating}>
-                                                                {isGenerating ? (
-                                                                    <Loader2 className="animate-spin" />
-                                                                ) : confirmationMode.type === 'initial' ? (
-                                                                    'Accept & add scopes'
-                                                                ) : confirmationMode.type === 'subscope' ? (
-                                                                    'Accept & generate sub-scopes'
-                                                                ) : confirmationMode.type === 'regenerate' ? (
-                                                                    'Accept & regenerate sub-scopes'
+                                                            <>
+                                                                <Button variant="ghost" onClick={() => setIsConfirmationDialogOpen(false)}>Cancel</Button>
+                                                                {isRefineMode ? (
+                                                                    <Button onClick={handleAcceptConfirmation}>
+                                                                        Refine scope
+                                                                    </Button>
                                                                 ) : (
-                                                                    'Accept & replace with alternative'
+                                                                    <Button onClick={handleAcceptConfirmation}>
+                                                                        {confirmationMode.type === 'initial' ? (
+                                                                            'Accept & add scopes'
+                                                                        ) : confirmationMode.type === 'subscope' ? (
+                                                                            'Accept & generate sub-scopes'
+                                                                        ) : confirmationMode.type === 'regenerate' ? (
+                                                                            'Accept & regenerate sub-scopes'
+                                                                        ) : (
+                                                                            'Accept & replace with alternative'
+                                                                        )}
+                                                                    </Button>
                                                                 )}
-                                                            </Button>
+                                                            </>
                                                         )}
                                                 </DialogFooter>
             </DialogContent>
