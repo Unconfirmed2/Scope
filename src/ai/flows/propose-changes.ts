@@ -6,6 +6,7 @@
 
 import { z } from 'zod';
 import { generateContent } from '@/ai/claude';
+import { type AiSettings } from '@/ai/ai-settings';
 
 const ProposeChangesInputSchema = z.object({
   mode: z.enum(['alternative', 'regenerate', 'subscope']).describe('Which action the user intends.'),
@@ -16,7 +17,7 @@ const ProposeChangesInputSchema = z.object({
   existingChildren: z.array(z.string()).optional(),
   userInput: z.string().optional().describe('Optional user feedback to tailor the proposal.'),
 });
-export type ProposeChangesInput = z.infer<typeof ProposeChangesInputSchema>;
+export type ProposeChangesInput = z.infer<typeof ProposeChangesInputSchema> & { aiSettings?: AiSettings };
 
 const _ProposeChangesOutputSchema = z.object({
   summary: z.string().describe('1-2 sentences describing the intended change in plain English.'),
@@ -50,7 +51,7 @@ export async function proposeChanges(input: ProposeChangesInput): Promise<Propos
   }
 
   const user = parts.join('\n');
-  const raw = await generateContent(user, system, 800);
+  const raw = await generateContent(user, system, 800, input.aiSettings);
 
   // Sanitize: strip code fences if present, trim, collapse whitespace.
   let text = raw.trim();

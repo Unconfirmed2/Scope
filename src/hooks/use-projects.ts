@@ -7,6 +7,7 @@ import type { Project, Task, TaskStatus, Comment, CommentStatus, Summary, Execut
 import { useToast } from '@/hooks/use-toast';
 import { findTaskPath, findTaskRecursive } from '@/lib/utils';
 import { handleExecuteTask } from '@/app/actions';
+import { type AiSettings } from '@/ai/ai-settings';
 import { useAuth } from './use-auth';
 
 
@@ -893,14 +894,15 @@ export function useProjects() {
         return findAndPerformCommentAction(projectId, taskId, action);
     };
 
-    const executeTask = async (projectId: string, taskId: string, taskText: string, userInput?: string, projectName?: string, otherTasks?: string[]): Promise<boolean> => {
+    const executeTask = async (projectId: string, taskId: string, taskText: string, userInput?: string, projectName?: string, otherTasks?: string[], aiSettings?: AiSettings): Promise<boolean> => {
         toast({ title: 'AI is on it!', description: `Executing scope: "${taskText}"` });
-        
-        const result = await handleExecuteTask({ 
-            task: taskText, 
-            userInput, 
-            projectName, 
-            otherTasks 
+
+        const result = await handleExecuteTask({
+            task: taskText,
+            userInput,
+            projectName,
+            otherTasks,
+            aiSettings,
         });
 
         if (result.success && result.result) {

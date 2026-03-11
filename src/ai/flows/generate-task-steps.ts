@@ -7,6 +7,7 @@
  */
 
 import { generateContentBlocks } from '@/ai/claude';
+import { type AiSettings } from '@/ai/ai-settings';
 import { parseJSONToTree, resetTreeIdCounter, type TreeNode } from '@/lib/json-to-tree';
 
 // Minimal types re-exported for UI compatibility (not enforced at runtime)
@@ -16,6 +17,7 @@ export type GenerateTaskStepsInput = {
     projectName?: string;
     existingTasks?: string[];
     photoDataUri?: string;
+    aiSettings?: AiSettings;
 };
 
 export type GenerateTaskStepsOutput = {
@@ -237,6 +239,7 @@ You are an advanced AI assistant tasked with analyzing and/or executing a wide v
         user: [{ text: userPrompt, cache: false }],
         maxTokens: 4000,
         temperature: 0.2,
+        aiSettings: input.aiSettings,
     });
     const unfenced = stripCodeFences(response);
 

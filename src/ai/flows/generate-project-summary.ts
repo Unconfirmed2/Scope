@@ -8,6 +8,7 @@
  */
 
 import { generateContentBlocks } from '@/ai/claude';
+import { type AiSettings } from '@/ai/ai-settings';
 import { z } from 'zod';
 
 const GenerateProjectSummaryInputSchema = z.object({
@@ -15,7 +16,7 @@ const GenerateProjectSummaryInputSchema = z.object({
   contextName: z.string().describe('The name of the overall folder for context.'),
   previousSummary: z.string().optional().describe('The previous summary text, if available. If provided, the new summary should focus on the delta/changes since the last one.'),
 });
-export type GenerateProjectSummaryInput = z.infer<typeof GenerateProjectSummaryInputSchema>;
+export type GenerateProjectSummaryInput = z.infer<typeof GenerateProjectSummaryInputSchema> & { aiSettings?: AiSettings };
 
 const GenerateProjectSummaryOutputSchema = z.object({
   summary: z.string().describe('The generated summary in paragraph form, suitable for an email. Use markdown for formatting like lists.'),
@@ -56,6 +57,7 @@ The summary must be ready to be pasted into an email, using clear, human-readabl
     ],
     maxTokens: 2000,
     temperature: 0.2,
+    aiSettings: input.aiSettings,
   });
   
   const result: GenerateProjectSummaryOutput = {

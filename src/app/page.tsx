@@ -4,6 +4,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type { Task, SortOption, Project } from '@/lib/types';
 import { handleGenerateTasks, handleGenerateProjectSummary, handleRephraseGoal, handleGenerateAlternativeScope, handleProposeChanges } from './actions';
+import { loadAiSettings, type AiSettings } from '@/ai/ai-settings';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -156,6 +157,7 @@ export default function Home() {
   } = useProjects();
   
   const [isGenerating, setIsGenerating] = useState(false);
+  const [aiSettings, setAiSettings] = useState<AiSettings>(() => loadAiSettings());
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
@@ -359,6 +361,7 @@ export default function Home() {
             projectName: isUnassigned ? undefined : targetProject.name,
             existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
             photoDataUri: goalImage?.dataUri,
+            aiSettings,
         });
         if (isStale(genId)) return;
         if (!result.success || !result.data) {
@@ -410,6 +413,7 @@ export default function Home() {
                     projectName: isUnassigned ? undefined : targetProject.name,
                     existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
                     photoDataUri: confirmationImage?.dataUri || goalImage?.dataUri,
+                    aiSettings,
                 });
                 if (isStale(genId)) return;
                 if (!res.success || !res.data) {
@@ -439,6 +443,7 @@ export default function Home() {
                                         siblingTitles: siblings,
                                         existingChildren,
                                         userInput: '',
+                                        aiSettings,
                                     });
                                     if (res2.success && res2.data) setProposal(res2.data); else setProposal(null);
                                 }
@@ -456,6 +461,7 @@ export default function Home() {
                     projectName: isUnassigned ? undefined : targetProject.name,
                     existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
                     photoDataUri: goalImage?.dataUri,
+                    aiSettings,
                 });
                 if (isStale(genId)) return;
                 if (!gen.success || !gen.data) {
@@ -527,6 +533,7 @@ export default function Home() {
                     // Always include minimal full JSON so the AI can detect true references across the tree
                     fullProjectJson: minimalProject,
                     trimmedContext: undefined,
+                    aiSettings,
                 });
                 if (isStale(genId)) return;
 
@@ -681,6 +688,7 @@ export default function Home() {
                     projectName: isUnassigned ? undefined : targetProject.name,
                     existingTasks: isUnassigned ? [] : existingSubtaskNames,
                     photoDataUri: imageContext,
+                    aiSettings,
                 });
                 if (isStale(genId)) return;
                 if (!gen.success || !gen.data) {
@@ -846,7 +854,7 @@ export default function Home() {
     
     toast({ title: 'Generating summary...', description: `The AI is analyzing "${'name' in itemToSummarize ? itemToSummarize.name : itemToSummarize.text}".` });
     
-    const result = await handleGenerateProjectSummary(activeProject, activeTask || undefined, latestSummary);
+    const result = await handleGenerateProjectSummary(activeProject, activeTask || undefined, latestSummary, aiSettings);
     
      if (result.success && result.summary) {
         if (activeTask) {
@@ -890,7 +898,8 @@ export default function Home() {
           executingTask.text,
           executionInput,
           isUnassigned ? undefined : activeProject.name,
-          otherTasks
+          otherTasks,
+          aiSettings
       );
 
       setIsExecuting(false);
@@ -1484,6 +1493,7 @@ export default function Home() {
                                                                                         parentPathTitles,
                                                                                         siblingTitles: siblings,
                                                                                         existingChildren,
+                                                                                        aiSettings,
                                                                                     });
                                                                                                                         if (res.success && res.data) setProposal(res.data);
                                                                                                                         else setProposal(null);
@@ -1509,6 +1519,7 @@ export default function Home() {
                                                                                         projectName: activeProject?.name,
                                                                                         parentPathTitles: parentTitles,
                                                                                         siblingTitles: siblings,
+                                                                                        aiSettings,
                                                                                     });
                                                                                                                         if (res.success && res.data) setProposal(res.data);
                                                                                                                         else setProposal(null);
@@ -1635,7 +1646,7 @@ export default function Home() {
         </div>
         <HelpDialog open={isHelpOpen} onOpenChange={setIsHelpOpen} />
         <AuthDialog open={isAuthDialogOpen} onOpenChange={setIsAuthDialogOpen} />
-        <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
+        <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} aiSettings={aiSettings} onAiSettingsChange={setAiSettings} />
         <HistoryDialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen} historyPast={historyPast} historyFuture={historyFuture} />
         <Dialog open={!!commentingTask} onOpenChange={(isOpen) => !isOpen && handleCloseCommentDialog()}>
             <DialogContent>

@@ -1,6 +1,7 @@
 "use server";
 
 import { generateContentBlocks } from "@/ai/claude";
+import { type AiSettings } from '@/ai/ai-settings';
 
 export type DependencyCandidate = {
   id: string;
@@ -28,6 +29,7 @@ export type AlternativeScopeInput = {
   projectName?: string;
   fullProjectJson?: unknown; // optionally include the whole JSON when dependencies exist
   trimmedContext?: unknown; // smaller payload when not needed
+  aiSettings?: AiSettings;
 };
 
 export type AlternativeScopeOutput = {
@@ -120,6 +122,7 @@ This response MUST contain exactly three top-level keys:
     user: userBlocks,
     maxTokens: 4000,
     temperature: 0.2,
+    aiSettings: input.aiSettings,
   });
 
   // Helper: strip common code fences if they appear

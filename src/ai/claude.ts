@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ContentBlock, TextBlock, Message } from '@anthropic-ai/sdk/resources/messages';
+import { type AiSettings, DEFAULT_AI_SETTINGS } from './ai-settings';
 
 // Validate API key at module load
 if (!process.env.ANTHROPIC_API_KEY) {
@@ -11,8 +12,8 @@ export const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// Claude model configuration
-export const CLAUDE_MODEL = 'claude-4-sonnet-20250514';
+// Fallback model (used when no settings are provided)
+export const CLAUDE_MODEL = DEFAULT_AI_SETTINGS.model;
 
 // Max input length to prevent abuse (characters)
 const MAX_INPUT_LENGTH = 50_000;
@@ -63,16 +64,21 @@ function validateInputLength(text: string, label: string): void {
 export async function generateContent(
   prompt: string,
   systemPrompt?: string,
-  maxTokens: number = 4000
+  maxTokens: number = 4000,
+  aiSettings?: AiSettings
 ): Promise<string> {
   validateInputLength(prompt, 'Prompt');
   if (systemPrompt) validateInputLength(systemPrompt, 'System prompt');
 
+  const model = aiSettings?.model || CLAUDE_MODEL;
+  const temperature = aiSettings?.temperature ?? 0.2;
+  const resolvedMaxTokens = aiSettings?.maxTokens ?? maxTokens;
+
   return withRetry(async () => {
     const message = await anthropic.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: maxTokens,
-      temperature: 0.2,
+      model,
+      max_tokens: resolvedMaxTokens,
+      temperature,
       messages: [
         {
           role: 'user',
@@ -105,9 +111,13 @@ export async function generateContentBlocks(
     system?: string | CacheableTextBlock[];
     maxTokens?: number;
     temperature?: number;
+    aiSettings?: AiSettings;
   }
 ): Promise<string> {
-  const { user, system, maxTokens = 4000, temperature = 0.6 } = params;
+  const { user, system, maxTokens = 4000, temperature = 0.6, aiSettings } = params;
+  const resolvedModel = aiSettings?.model || CLAUDE_MODEL;
+  const resolvedTemperature = aiSettings?.temperature ?? temperature;
+  const resolvedMaxTokens = aiSettings?.maxTokens ?? maxTokens;
 
   // Validate total input size
   const totalUserText = user.map(b => b.text).join('');
@@ -133,9 +143,9 @@ export async function generateContentBlocks(
 
   return withRetry(async () => {
     const message = await anthropic.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: maxTokens,
-      temperature,
+      model: resolvedModel,
+      max_tokens: resolvedMaxTokens,
+      temperature: resolvedTemperature,
       messages: [
         {
           role: 'user',
