@@ -49,6 +49,9 @@ const nextConfig: NextConfig = {
     '@opentelemetry/sdk-node',
     '@opentelemetry/resources',
     '@opentelemetry/semantic-conventions',
+    '@neondatabase/serverless',
+    '@prisma/adapter-neon',
+    'bcryptjs',
   ],
   // Fine-tune Webpack to avoid resolving optional packages that cause build errors
   webpack: (config: Record<string, any>, { isServer }: { isServer: boolean }) => {
@@ -133,6 +136,12 @@ const nextConfig: NextConfig = {
       {
         protocol: 'https',
         hostname: 'placehold.co',
+        port: '',
+        pathname: '/**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'lh3.googleusercontent.com',
         port: '',
         pathname: '/**',
       },

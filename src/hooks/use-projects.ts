@@ -7,6 +7,7 @@ import type { Project, Task, TaskStatus, Comment, CommentStatus, Summary, Execut
 import { useToast } from '@/hooks/use-toast';
 import { findTaskPath, findTaskRecursive } from '@/lib/utils';
 import { handleExecuteTask } from '@/app/actions';
+import { loadProjects as dbLoadProjects, saveProjects as dbSaveProjects } from '@/app/db-actions';
 import { type AiSettings } from '@/ai/ai-settings';
 import { useAuth } from './use-auth';
 
@@ -186,53 +187,95 @@ export function useProjects() {
     const [saveError, setSaveError] = useState<string | null>(null);
     const { toast } = useToast();
     const isInitialLoadForUser = useRef(true);
+    const dbSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const lastSavedJsonRef = useRef<string>('');
 
-
+    // Load data: from DB if authenticated, from localStorage otherwise
     useEffect(() => {
-        if (!loading) {
-            if (isInitialLoadForUser.current) {
-                setState(prevState => ({ ...prevState, ...loadInitialData(user?.uid || null) }));
+        if (loading) return;
+
+        const loadData = async () => {
+            if (user?.uid) {
+                // Try loading from database
+                try {
+                    const result = await dbLoadProjects();
+                    if (result.success && result.projects) {
+                        const dbProjects = result.projects;
+                        // Ensure unassigned folder exists
+                        const hasUnassigned = dbProjects.some(p => p.id === 'unassigned');
+                        const projects = hasUnassigned ? dbProjects : [initialUnassignedProject, ...dbProjects];
+                        lastSavedJsonRef.current = JSON.stringify(projects);
+                        setState(prev => ({
+                            ...prev,
+                            projects,
+                            activeItem: { projectId: projects.find(p => p.id !== 'unassigned')?.id || projects[0]?.id || null, taskId: null },
+                            isLoaded: true,
+                            historyPast: [],
+                            historyFuture: [],
+                        }));
+                        isInitialLoadForUser.current = false;
+                        return;
+                    }
+                } catch (e) {
+                    console.warn('Failed to load from DB, falling back to localStorage', e);
+                }
+            }
+
+            // Fallback: localStorage
+            if (isInitialLoadForUser.current || !loading) {
+                setState(prev => ({ ...prev, ...loadInitialData(user?.uid || null) }));
                 isInitialLoadForUser.current = false;
             }
-        }
-    }, [user, loading]);
-    
-    // This effect handles switching data contexts when auth state changes
+        };
+
+        loadData();
+    }, [user, loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Save data: to DB (debounced) if authenticated, to localStorage always
     useEffect(() => {
-        if (!isInitialLoadForUser.current && !loading) {
-             setState(prevState => ({ ...prevState, isLoaded: false })); // Set loading state
-             // Give time for UI to show loading state before heavy load operation
-             setTimeout(() => {
-                setState(prevState => ({ ...prevState, ...loadInitialData(user?.uid || null) }));
-             }, 50);
-        }
-    }, [user, loading]);
+        if (!state.isLoaded || loading) return;
 
-    // This effect handles saving data to localStorage with storage monitoring
-    useEffect(() => {
-        if (state.isLoaded && !loading) {
-            try {
-                const projectKey = user ? `projects_${user.uid}` : 'projects_anonymous';
-                const activeItemKey = user ? `activeItem_${user.uid}` : 'activeItem_anonymous';
-                const historyKey = user ? `history_${user.uid}` : 'history_anonymous';
-                const projectsJson = JSON.stringify(state.projects);
-                const historyJson = JSON.stringify({ past: state.historyPast, future: state.historyFuture });
+        // Always save to localStorage as a fast cache
+        try {
+            const projectKey = user ? `projects_${user.uid}` : 'projects_anonymous';
+            const activeItemKey = user ? `activeItem_${user.uid}` : 'activeItem_anonymous';
+            const historyKey = user ? `history_${user.uid}` : 'history_anonymous';
+            const projectsJson = JSON.stringify(state.projects);
+            const historyJson = JSON.stringify({ past: state.historyPast, future: state.historyFuture });
 
-                // Monitor storage usage (localStorage is typically ~5MB)
-                const totalBytes = projectsJson.length + historyJson.length;
-                const STORAGE_WARNING_THRESHOLD = 4 * 1024 * 1024; // 4MB
-                if (totalBytes > STORAGE_WARNING_THRESHOLD) {
-                    console.warn(`localStorage usage high: ${(totalBytes / 1024 / 1024).toFixed(1)}MB. Consider exporting your data.`);
-                }
-
-                window.localStorage.setItem(projectKey, projectsJson);
-                window.localStorage.setItem(activeItemKey, JSON.stringify(state.activeItem));
-                window.localStorage.setItem(historyKey, historyJson);
-                if (saveError) setSaveError(null);
-            } catch (error) {
-                console.warn(`Error writing to localStorage:`, error);
-                setSaveError('Your browser may be out of storage space. Consider exporting your data and clearing old projects.');
+            const totalBytes = projectsJson.length + historyJson.length;
+            const STORAGE_WARNING_THRESHOLD = 4 * 1024 * 1024;
+            if (totalBytes > STORAGE_WARNING_THRESHOLD) {
+                console.warn(`localStorage usage high: ${(totalBytes / 1024 / 1024).toFixed(1)}MB. Consider exporting your data.`);
             }
+
+            window.localStorage.setItem(projectKey, projectsJson);
+            window.localStorage.setItem(activeItemKey, JSON.stringify(state.activeItem));
+            window.localStorage.setItem(historyKey, historyJson);
+            if (saveError) setSaveError(null);
+        } catch (error) {
+            console.warn(`Error writing to localStorage:`, error);
+            setSaveError('Your browser may be out of storage space. Consider exporting your data and clearing old projects.');
+        }
+
+        // Debounced save to DB if authenticated
+        if (user?.uid) {
+            const currentJson = JSON.stringify(state.projects);
+            if (currentJson === lastSavedJsonRef.current) return; // No changes
+
+            if (dbSaveTimerRef.current) clearTimeout(dbSaveTimerRef.current);
+            dbSaveTimerRef.current = setTimeout(async () => {
+                try {
+                    const result = await dbSaveProjects(state.projects);
+                    if (result.success) {
+                        lastSavedJsonRef.current = currentJson;
+                    } else {
+                        console.warn('DB save failed:', result.error);
+                    }
+                } catch (e) {
+                    console.warn('DB save error:', e);
+                }
+            }, 2000); // 2-second debounce
         }
     }, [state.projects, state.activeItem, state.historyPast, state.historyFuture, state.isLoaded, user, loading, saveError]);
 

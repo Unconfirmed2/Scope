@@ -2,7 +2,7 @@
 import type {Metadata} from 'next';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster"
-import { AuthProvider } from '@/hooks/use-auth';
+import { Providers } from './providers';
 import { ErrorBoundary } from '@/components/error-boundary';
 
 export const metadata: Metadata = {
@@ -24,10 +24,10 @@ export default function RootLayout({
       </head>
       <body className="font-sans antialiased">
         <ErrorBoundary>
-          <AuthProvider>
+          <Providers>
               {children}
               <Toaster />
-          </AuthProvider>
+          </Providers>
         </ErrorBoundary>
       </body>
     </html>

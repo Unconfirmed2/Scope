@@ -1,12 +1,5 @@
-import { NextResponse } from 'next/server';
+import NextAuth from 'next-auth';
+import { authOptions } from '@/lib/auth';
 
-// Placeholder to satisfy Next.js type generation when NextAuth is not configured.
-// Returns a 501 for both GET and POST requests.
-export async function GET() {
-	return new NextResponse('NextAuth is disabled in this build.', { status: 501 });
-}
-
-export async function POST() {
-	return new NextResponse('NextAuth is disabled in this build.', { status: 501 });
-}
-
+const handler = NextAuth(authOptions);
+export { handler as GET, handler as POST };
