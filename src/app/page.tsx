@@ -1191,7 +1191,7 @@ export default function Home() {
                                             <Settings className="mr-2"/> Settings
                                         </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => setIsHelpOpen(true)}>
-                                            <HelpCircle className="mr-2"/> Help
+                                            <HelpCircle className="mr-2"/> Guide
                                         </DropdownMenuItem>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem onClick={logOut}>
