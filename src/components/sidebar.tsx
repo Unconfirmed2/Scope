@@ -240,7 +240,6 @@ export function Sidebar({
   isOpen, onSetIsOpen, width, projects, activeProjectId, activeTaskId, sortOption, onSetSortOption, onItemSelect, onCreateProject, onCreateTask, onDeleteProject, onUpdateProject, onDeleteTask, onMoveTask, onPromoteSubtask, onExportProject
 }: SidebarProps) {
   const { user, logOut } = useAuth();
-  const [newTaskName, setNewTaskName] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>(() => {
@@ -261,15 +260,6 @@ export function Sidebar({
     }
   }, [editingProjectId])
 
-  const handleCreateTask = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newTaskName.trim()) {
-      onCreateTask('unassigned', newTaskName.trim());
-      setNewTaskName('');
-      // Expand unassigned folder if it's collapsed
-      setCollapsedProjects(prev => ({...prev, 'unassigned': false}));
-    }
-  };
 
   const handleCreateProject = () => {
     if (newProjectName.trim()) {
@@ -541,19 +531,6 @@ export function Sidebar({
             </div>
           )
         })}
-      </div>
-      <div className="p-2 border-t">
-        <form onSubmit={handleCreateTask} className="flex gap-2">
-          <Input
-            value={newTaskName}
-            onChange={(e) => setNewTaskName(e.target.value)}
-            placeholder="New scope in Unassigned..."
-            className="bg-background text-foreground"
-          />
-          <Button type="submit" size="icon" variant="outline">
-            <Plus />
-          </Button>
-        </form>
       </div>
       </TooltipProvider>
     </aside>
