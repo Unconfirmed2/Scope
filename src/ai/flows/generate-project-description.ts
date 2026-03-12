@@ -34,7 +34,7 @@ Return only the folder description, nothing else.`;
 
   let userPrompt = `Folder Name: "${validated.projectName}"\n\nScopes:`;
   
-  validated.tasks.forEach(task => {
+  validated.tasks.forEach((task: string) => {
     userPrompt += `\n- ${task}`;
   });
 

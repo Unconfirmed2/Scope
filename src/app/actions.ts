@@ -9,14 +9,28 @@ import { rephraseGoal, type RephraseGoalInput, type RephraseGoalOutput } from '@
 import { generateAlternativeScope, type AlternativeScopeInput, type AlternativeScopeOutput } from '@/ai/flows/generate-alternative-scope';
 import { proposeChanges, type ProposeChangesInput } from '@/ai/flows/propose-changes';
 import { type Task, type Project, type CommentStatus, type TaskStatus, type Comment, type ExecutionResult } from '@/lib/types';
+import { type AiSettings } from '@/ai/ai-settings';
 
+// Optional AI settings schema for validation (permissive - just pass through)
+const AiSettingsSchema = z.object({
+    model: z.string().optional(),
+    temperature: z.number().min(0).max(1).optional(),
+    maxTokens: z.number().min(100).max(128000).optional(),
+}).optional();
+
+
+// Input length limits to prevent abuse
+const MAX_GOAL_LENGTH = 5000;
+const MAX_USER_INPUT_LENGTH = 10000;
+const MAX_PROJECT_NAME_LENGTH = 200;
 
 const GenerateTasksInputSchema = z.object({
-    goal: z.string(),
-    userInput: z.string().optional(),
-    projectName: z.string().optional(),
-    existingTasks: z.array(z.string()).optional(),
+    goal: z.string().min(1, 'Goal is required').max(MAX_GOAL_LENGTH, `Goal must be under ${MAX_GOAL_LENGTH} characters`),
+    userInput: z.string().max(MAX_USER_INPUT_LENGTH).optional(),
+    projectName: z.string().max(MAX_PROJECT_NAME_LENGTH).optional(),
+    existingTasks: z.array(z.string().max(500)).max(200).optional(),
     photoDataUri: z.string().optional(),
+    aiSettings: AiSettingsSchema,
 });
 type GenerateTasksInput = z.infer<typeof GenerateTasksInputSchema>;
 
@@ -30,6 +44,7 @@ export async function handleGenerateTasks(input: GenerateTasksInput): Promise<{ 
             projectName: validatedInput.projectName,
             existingTasks: validatedInput.existingTasks,
             photoDataUri: validatedInput.photoDataUri,
+            aiSettings: validatedInput.aiSettings as AiSettings | undefined,
         };
 
         const result = await generateTaskSteps(flowInput);
@@ -47,13 +62,14 @@ const RephraseInputSchema = z.object({
     projectName: z.string().optional(),
     existingTasks: z.array(z.string()).optional(),
     photoDataUri: z.string().optional(),
+    aiSettings: AiSettingsSchema,
 });
 type RephraseInput = z.infer<typeof RephraseInputSchema>;
 
 export async function handleRephraseGoal(input: RephraseInput): Promise<{ success: boolean; data?: RephraseGoalOutput; error?: string }> {
     try {
         const validated = RephraseInputSchema.parse(input);
-        const flowInput: RephraseGoalInput = validated;
+        const flowInput: RephraseGoalInput = { ...validated, aiSettings: validated.aiSettings as AiSettings | undefined };
         const result = await rephraseGoal(flowInput);
         return { success: true, data: result };
     } catch (error) {
@@ -114,13 +130,14 @@ const transformItemForAI = (item: Project | Task) => {
     }
 };
 
-export async function handleGenerateProjectSummary(project: Project, activeTask?: Task, previousSummary?: string) {
+export async function handleGenerateProjectSummary(project: Project, activeTask?: Task, previousSummary?: string, aiSettings?: AiSettings) {
     try {
         const itemToSummarize = activeTask ? activeTask : project;
         const aiPayload: GenerateProjectSummaryInput = {
             itemToSummarize: transformItemForAI(itemToSummarize),
             contextName: project.name, // Always use the root folder name for context
             previousSummary,
+            aiSettings,
         }
         const result = await generateProjectSummary(aiPayload);
         return { success: true, summary: result.summary };
@@ -136,12 +153,13 @@ const executeTaskSchema = z.object({
     userInput: z.string().optional(),
     projectName: z.string().optional(),
     otherTasks: z.array(z.string()).optional(),
+    aiSettings: AiSettingsSchema,
 });
 
 export async function handleExecuteTask(input: ExecuteTaskInput) {
     try {
         const validatedInput = executeTaskSchema.parse(input);
-        const result = await executeTask(validatedInput);
+        const result = await executeTask({ ...validatedInput, aiSettings: validatedInput.aiSettings as AiSettings | undefined });
         return { success: true, result: result.result };
     } catch (error) {
         console.error("Error in handleExecuteTask:", error);
@@ -174,6 +192,7 @@ const AlternativeScopeInputSchema = z.object({
     projectName: z.string().optional(),
     fullProjectJson: z.any().optional(),
     trimmedContext: z.any().optional(),
+    aiSettings: AiSettingsSchema,
 });
 
 type AlternativeInput = z.infer<typeof AlternativeScopeInputSchema>;
@@ -181,7 +200,7 @@ type AlternativeInput = z.infer<typeof AlternativeScopeInputSchema>;
 export async function handleGenerateAlternativeScope(input: AlternativeInput): Promise<{ success: boolean; data?: AlternativeScopeOutput; error?: string }> {
     try {
         const validated = AlternativeScopeInputSchema.parse(input);
-        const result = await generateAlternativeScope(validated as AlternativeScopeInput);
+        const result = await generateAlternativeScope({ ...validated, aiSettings: validated.aiSettings as AiSettings | undefined } as AlternativeScopeInput);
         return { success: true, data: result };
     } catch (error) {
         console.error('Error in handleGenerateAlternativeScope:', error);
@@ -199,13 +218,15 @@ const ProposeChangesSchema = z.object({
     siblingTitles: z.array(z.string()).optional(),
     existingChildren: z.array(z.string()).optional(),
     userInput: z.string().optional(),
+    aiSettings: AiSettingsSchema,
 });
 type ProposalInput = z.infer<typeof ProposeChangesSchema>;
 
 export async function handleProposeChanges(input: ProposalInput): Promise<{ success: boolean; data?: string; error?: string }> {
     try {
-        const validated = ProposeChangesSchema.parse(input) as ProposeChangesInput;
-        const result = await proposeChanges(validated);
+        const validated = ProposeChangesSchema.parse(input);
+        const flowInput = { ...validated, aiSettings: validated.aiSettings as AiSettings | undefined } as ProposeChangesInput;
+        const result = await proposeChanges(flowInput);
         return { success: true, data: result };
     } catch (error) {
         console.error('Error in handleProposeChanges:', error);

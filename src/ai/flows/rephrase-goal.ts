@@ -1,6 +1,7 @@
 "use server";
 
 import { generateContent } from '@/ai/claude';
+import { type AiSettings } from '@/ai/ai-settings';
 
 export type RephraseGoalInput = {
   goal: string;
@@ -8,6 +9,7 @@ export type RephraseGoalInput = {
   projectName?: string;
   existingTasks?: string[];
   photoDataUri?: string;
+  aiSettings?: AiSettings;
 };
 
 export type RephraseGoalOutput = {
@@ -39,7 +41,7 @@ export async function rephraseGoal(input: RephraseGoalInput): Promise<RephraseGo
   }
 
   // Small cap; it's a single-line rewrite
-  const response = await generateContent(userPrompt, systemPrompt, 200);
+  const response = await generateContent(userPrompt, systemPrompt, 200, input.aiSettings);
   const rephrased = response.trim().replace(/^\"|\"$/g, '');
   return { goal: rephrased };
 }

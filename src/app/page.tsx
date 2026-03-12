@@ -3,12 +3,12 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import type { Task, SortOption, Project } from '@/lib/types';
-// Persona feature removed
 import { handleGenerateTasks, handleGenerateProjectSummary, handleRephraseGoal, handleGenerateAlternativeScope, handleProposeChanges } from './actions';
+import { loadAiSettings, type AiSettings } from '@/ai/ai-settings';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, ArrowUpDown, Pencil, ChevronRight, MessageSquare, BrainCircuit, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, Folder, File, Zap as ZapIcon, Bot, List, Map as MapIcon, Columns, LogOut, User, ImagePlus, RotateCw, RotateCcw, History } from 'lucide-react';
+import { Plus, Loader2, LayoutPanelLeft, ListTree, KanbanSquare, Pencil, ChevronRight, MessageSquare, Save, Edit, Waypoints, FileText, Zap, Trash2, FilePlus2, Settings, Menu, HelpCircle, LogOut, User, ImagePlus, RotateCw, RotateCcw, History, Lightbulb, ClipboardList, Search, Download, Upload, Filter, X } from 'lucide-react';
 import { Sidebar } from '@/components/sidebar';
 import { TreeViewWrapper as TreeView } from '@/components/tree-view';
 import { KanbanView } from '@/components/kanban-view';
@@ -18,6 +18,9 @@ import { SummaryView } from '@/components/summary-view';
 import { ExecutionView } from '@/components/execution-view';
 import { AuthDialog } from '@/components/auth-dialog';
 import { SettingsDialog } from '@/components/settings-dialog';
+import { HistoryDialog } from '@/components/history-dialog';
+import { SearchModal } from '@/components/search-modal';
+import { HelpDialog } from '@/components/help-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from '@/components/ui/textarea';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -28,20 +31,14 @@ import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Label } from '@/components/ui/label';
-// import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import type { GenerateTaskStepsOutput } from '@/ai/flows/generate-task-steps';
-// import { Slider } from '@/components/ui/slider';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
-// import Linkify from 'linkify-react';
 import React from 'react';
 import { useAuth } from '@/hooks/use-auth';
-// import { useRouter } from 'next/navigation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import Image from 'next/image';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
-// Persona feature removed
 
 const readFileAsDataURL = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -93,7 +90,7 @@ const convertRawToTasks = (raw: any, parentId: string | null): Task[] => {
     const fromAny = (value: any, currentParentId: string | null): Task[] => {
         if (value == null) return [];
         if (Array.isArray(value)) {
-            return value.flatMap((v, i) => fromAny(v, currentParentId));
+            return value.flatMap((v) => fromAny(v, currentParentId));
         }
         if (typeof value === 'object') {
             // Generic object: each key becomes a task with nested conversion of its value
@@ -136,7 +133,6 @@ export default function Home() {
     createProject,
     createTaskInProject,
     updateProject,
-    setTasksForProject,
     addSummaryToProject,
     addSummaryToTask,
     updateTaskAndPropagateStatus,
@@ -161,17 +157,19 @@ export default function Home() {
   } = useProjects();
   
   const [isGenerating, setIsGenerating] = useState(false);
+  const [aiSettings, setAiSettings] = useState<AiSettings>(() => loadAiSettings());
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
   const [goal, setGoal] = useState('');
-  const [goalImage, setGoalImage] = useState<{file: File, dataUri: string} | null>(null);
+  const [goalImage, setGoalImage] = useState<{dataUri: string} | null>(null);
   const [taskSortOption, setTaskSortOption] = useState<SortOption>({ key: 'edit-date', direction: 'desc' });
   const [projectSortOption, setProjectSortOption] = useState<SortOption>({ key: 'edit-date', direction: 'desc' });
   const [isEditingProjectName, setIsEditingProjectName] = useState(false);
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [descriptionText, setDescriptionText] = useState('');
   const [activeTab, setActiveTab] = useState('list');
+  const [activeSection, setActiveSection] = useState<'brainstorm' | 'plan'>('brainstorm');
   const [commentingTask, setCommentingTask] = useState<Task | null>(null);
   const [newCommentText, setNewCommentText] = useState('');
   const [executingTask, setExecutingTask] = useState<Task | null>(null);
@@ -181,7 +179,28 @@ export default function Home() {
   const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [recentlyChanged, setRecentlyChanged] = useState<Record<string, { kind: 'new' | 'updated'; at: number }>>({});
-  
+
+    // Clean up stale recentlyChanged entries after 10 seconds
+    useEffect(() => {
+        if (Object.keys(recentlyChanged).length === 0) return;
+        const timer = setInterval(() => {
+            const now = Date.now();
+            setRecentlyChanged(prev => {
+                const next: typeof prev = {};
+                let changed = false;
+                for (const [id, entry] of Object.entries(prev)) {
+                    if (now - entry.at < 10_000) {
+                        next[id] = entry;
+                    } else {
+                        changed = true;
+                    }
+                }
+                return changed ? next : prev;
+            });
+        }, 5_000);
+        return () => clearInterval(timer);
+    }, [recentlyChanged]);
+
     const [aiConfirmationResponse, setAiConfirmationResponse] = useState<GenerateTaskStepsOutput | null>(null);
     // Alternative flow response + summary dialog
     const [altChangesSummary, setAltChangesSummary] = useState<{ replacedTitle: string; updatedTargets: string[]; notes?: string[] } | null>(null);
@@ -190,19 +209,57 @@ export default function Home() {
     const [refinedGoal, setRefinedGoal] = useState<string | null>(null);
             const [proposal, setProposal] = useState<string | null>(null);
   const [confirmationInput, setConfirmationInput] = useState('');
-  const [confirmationImage, setConfirmationImage] = useState<{file: File, dataUri: string} | null>(null);
+  const [confirmationImage, setConfirmationImage] = useState<{dataUri: string} | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-    // Persona feature removed
     const isRefineMode = useMemo(() => Boolean(confirmationInput.trim() || confirmationImage), [confirmationInput, confirmationImage]);
+
+    const resetConfirmationState = useCallback(() => {
+        setConfirmationInput('');
+        setConfirmationImage(null);
+        setAiConfirmationResponse(null);
+        setRefinedGoal(null);
+        setProposal(null);
+        setConfirmationMode({ type: 'initial' });
+    }, []);
     // Unified confirmation dialog mode
         const [confirmationMode, setConfirmationMode] = useState<{ type: 'initial' | 'subscope' | 'regenerate' | 'alternative'; targetTaskId?: string }>({ type: 'initial' });
+    const [generationStep, setGenerationStep] = useState<string | null>(null);
 
-    // Keyboard shortcuts: Undo/Redo
+    // Cancellation: each generation gets a unique ID; cancel invalidates it
+    const generationIdRef = useRef(0);
+    const isCancelledRef = useRef(false);
+
+    const startGeneration = useCallback(() => {
+        generationIdRef.current += 1;
+        isCancelledRef.current = false;
+        setIsGenerating(true);
+        return generationIdRef.current;
+    }, []);
+
+    const cancelGeneration = useCallback(() => {
+        isCancelledRef.current = true;
+        setIsGenerating(false);
+        setGenerationStep(null);
+        toast({ title: 'Generation cancelled' });
+    }, [toast]);
+
+    const isStale = useCallback((id: number) => {
+        return id !== generationIdRef.current || isCancelledRef.current;
+    }, []);
+
+    const [isSearchOpen, setIsSearchOpen] = useState(false);
+    const [statusFilter, setStatusFilter] = useState<'all' | 'todo' | 'inprogress' | 'done'>('all');
+    const [sourceFilter, setSourceFilter] = useState<'all' | 'ai' | 'manual'>('all');
+
+    // Keyboard shortcuts: Undo/Redo + Search
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
             const isMac = navigator.platform.toUpperCase().includes('MAC');
             const mod = isMac ? e.metaKey : e.ctrlKey;
-            if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+            if (mod && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                setIsSearchOpen(true);
+            } else if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) {
                 e.preventDefault();
                 if (canUndo) undo();
             } else if ((mod && e.key.toLowerCase() === 'y') || (mod && e.shiftKey && e.key.toLowerCase() === 'z')) {
@@ -216,13 +273,13 @@ export default function Home() {
 
   
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>,
-    setter: React.Dispatch<React.SetStateAction<{file: File, dataUri: string} | null>>) => {
+    setter: React.Dispatch<React.SetStateAction<{dataUri: string} | null>>) => {
     const file = e.target.files?.[0];
     if (file) {
       try {
         const dataUri = await readFileAsDataURL(file);
-        setter({ file, dataUri });
-      } catch (error) {
+        setter({ dataUri });
+      } catch {
         toast({ variant: 'destructive', title: 'Error reading file', description: 'Could not process the selected file.' });
       }
     }
@@ -294,6 +351,15 @@ export default function Home() {
     return countCommentsRecursively(activeProject.tasks);
   }, [activeProject]);
 
+  const getTargetProject = useCallback(() => {
+    const id = activeProjectId || 'unassigned';
+    const project = projects.find(p => p.id === id);
+    if (!project) {
+      toast({ variant: 'destructive', title: 'Error', description: 'Could not find a folder to add the scope to.' });
+    }
+    return project ?? null;
+  }, [projects, activeProjectId, toast]);
+
   useEffect(() => {
     if (activeProject) {
         setDescriptionText(activeProject.description || '');
@@ -304,19 +370,23 @@ export default function Home() {
     setIsEditingDescription(false);
   }, [activeProject]);
 
+  // Reset active tab when switching sections if current tab is not available
+  useEffect(() => {
+    if (!sectionViews[activeSection].includes(activeTab)) {
+      setActiveTab(sectionViews[activeSection][0]);
+    }
+  }, [activeSection]);
+
   const onFormSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!goal.trim() || !isLoaded || !activeProject) return;
+    if (!goal.trim() || !isLoaded || !activeProject || isGenerating) return;
 
-    const targetProjectId = activeProjectId || 'unassigned';
-    const targetProject = projects.find(p => p.id === targetProjectId);
+    const targetProject = getTargetProject();
+    if (!targetProject) return;
+    const targetProjectId = targetProject.id;
 
-    if (!targetProject) {
-        toast({ variant: 'destructive', title: 'Error', description: 'Could not find a folder to add the scope to.' });
-        return;
-    }
-
-    setIsGenerating(true);
+    const genId = startGeneration();
+    setGenerationStep('Clarifying scope...');
 
     try {
         toast({ title: 'Clarifying scope...', description: 'AI is rephrasing for clarity.' });
@@ -326,7 +396,9 @@ export default function Home() {
             projectName: isUnassigned ? undefined : targetProject.name,
             existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
             photoDataUri: goalImage?.dataUri,
+            aiSettings,
         });
+        if (isStale(genId)) return;
         if (!result.success || !result.data) {
             toast({ variant: 'destructive', title: 'Rephrase Failed', description: result.error || 'The AI could not rephrase the scope.' });
             return;
@@ -337,25 +409,28 @@ export default function Home() {
     setConfirmationMode({ type: 'initial' });
 
     } catch (error) {
+        if (isStale(genId)) return;
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred during generation.';
         toast({ variant: 'destructive', title: 'An unexpected error occurred', description: errorMessage });
     } finally {
-        setIsGenerating(false);
+        if (!isStale(genId)) {
+            setIsGenerating(false);
+            setGenerationStep(null);
+        }
     }
   };
 
   const handleAcceptConfirmation = async () => {
     if (!isLoaded) return;
-  
-    const targetProjectId = activeProjectId || 'unassigned';
-    const targetProject = projects.find(p => p.id === targetProjectId);
 
-    if (!targetProject) {
-        toast({ variant: 'destructive', title: 'Error', description: 'Could not find a folder to add the scope to.' });
-        return;
-    }
-  
-    setIsGenerating(true);
+    const targetProject = getTargetProject();
+    if (!targetProject) return;
+    const targetProjectId = targetProject.id;
+
+    // Capture image data URI before narrowing
+    const currentImageUri = confirmationImage?.dataUri ?? goalImage?.dataUri;
+
+    const genId = startGeneration();
     // Keep dialog open during some flows to allow follow-ups; we will close it explicitly per-branch
   
     try {
@@ -364,6 +439,7 @@ export default function Home() {
             // If user provided feedback, refine the goal only (do not generate tasks yet)
             const hasNewInput = confirmationInput.trim() || confirmationImage;
             if (hasNewInput) {
+                setGenerationStep('Refining scope...');
                 toast({ title: 'Refining scope...' });
                 const res = await handleRephraseGoal({
                     goal: refinedGoal || goal,
@@ -371,7 +447,9 @@ export default function Home() {
                     projectName: isUnassigned ? undefined : targetProject.name,
                     existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
                     photoDataUri: confirmationImage?.dataUri || goalImage?.dataUri,
+                    aiSettings,
                 });
+                if (isStale(genId)) return;
                 if (!res.success || !res.data) {
                     toast({ variant: 'destructive', title: 'Refine Failed', description: res.error || 'The AI could not refine the scope.' });
                     setIsGenerating(false);
@@ -399,6 +477,7 @@ export default function Home() {
                                         siblingTitles: siblings,
                                         existingChildren,
                                         userInput: '',
+                                        aiSettings,
                                     });
                                     if (res2.success && res2.data) setProposal(res2.data); else setProposal(null);
                                 }
@@ -409,13 +488,16 @@ export default function Home() {
             // No feedback: now generate based on mode
             if (confirmationMode.type === 'initial') {
                 const finalGoal = refinedGoal || goal;
+                setGenerationStep('Generating scope breakdown...');
                 toast({ title: 'Generating scopes...' });
                 const gen = await handleGenerateTasks({
                     goal: finalGoal,
                     projectName: isUnassigned ? undefined : targetProject.name,
                     existingTasks: isUnassigned ? [] : targetProject.tasks.map(t => t.text),
                     photoDataUri: goalImage?.dataUri,
+                    aiSettings,
                 });
+                if (isStale(genId)) return;
                 if (!gen.success || !gen.data) {
                     toast({ variant: 'destructive', title: 'AI Generation Failed', description: gen.error || 'The AI did not return a valid structure.' });
                     setIsGenerating(false);
@@ -473,6 +555,7 @@ export default function Home() {
                 const toMinimal = (tasks: Task[]): MinimalNode[] => tasks.map(t => ({ id: t.id, text: t.text, description: t.description, children: t.subtasks ? toMinimal(t.subtasks) : [] }));
                 const minimalProject = { name: targetProject.name, tasks: toMinimal(targetProject.tasks) };
 
+                setGenerationStep('Creating alternative and assessing dependencies...');
                 toast({ title: 'Creating alternative and assessing related updates...' });
                 const alt = await handleGenerateAlternativeScope({
                     selectedNode: { id: parentTask.id, text: parentTask.text, description: parentTask.description, subtasks: parentTask.subtasks?.map(st => ({ text: st.text, description: st.description, subtasks: st.subtasks?.length ? [{}] : undefined })) },
@@ -484,7 +567,9 @@ export default function Home() {
                     // Always include minimal full JSON so the AI can detect true references across the tree
                     fullProjectJson: minimalProject,
                     trimmedContext: undefined,
+                    aiSettings,
                 });
+                if (isStale(genId)) return;
 
                 if (!alt.success || !alt.data) {
                     toast({ variant: 'destructive', title: 'AI Failed', description: alt.error || 'Could not create an alternative.' });
@@ -628,21 +713,29 @@ export default function Home() {
                     return;
                 }
                 const finalParentText = refinedGoal || parentTask.text;
+                setGenerationStep(confirmationMode.type === 'regenerate' ? 'Regenerating sub-scopes...' : 'Generating sub-scopes...');
                 toast({ title: confirmationMode.type === 'regenerate' ? 'Regenerating sub-scopes...' : 'Generating sub-scopes...' });
                 const existingSubtaskNames = (parentTask.subtasks || []).map(t => t.text);
-                const imageContext = (confirmationImage ? (confirmationImage as any).dataUri : undefined) ?? (goalImage ? (goalImage as any).dataUri : undefined);
+                const imageContext = currentImageUri;
                 const gen = await handleGenerateTasks({
                     goal: finalParentText,
                     projectName: isUnassigned ? undefined : targetProject.name,
                     existingTasks: isUnassigned ? [] : existingSubtaskNames,
                     photoDataUri: imageContext,
+                    aiSettings,
                 });
+                if (isStale(genId)) return;
                 if (!gen.success || !gen.data) {
                     toast({ variant: 'destructive', title: 'AI Generation Failed', description: gen.error || 'The AI did not return a valid structure.' });
                     setIsGenerating(false);
                     return;
                 }
                 const newSubtasks = convertRawToTasks(gen.data.raw, parentTask.id);
+                if (newSubtasks.length === 0) {
+                    toast({ variant: 'destructive', title: 'AI Generation Failed', description: 'The AI returned an empty or invalid structure.' });
+                    setIsGenerating(false);
+                    return;
+                }
                 if (confirmationMode.type === 'subscope') {
                     if (addSubtask(targetProject.id, parentTask.id, newSubtasks, false)) {
                         toast({ title: 'Sub-scopes generated!' });
@@ -676,31 +769,26 @@ export default function Home() {
 
         setGoal('');
       setGoalImage(null);
-      setConfirmationInput('');
-      setConfirmationImage(null);
-      setAiConfirmationResponse(null);
-      setRefinedGoal(null);
-            setProposal(null);
-    setConfirmationMode({ type: 'initial' });
+      resetConfirmationState();
 
     } catch (error) {
+        if (isStale(genId)) return;
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred during generation.';
         toast({ variant: 'destructive', title: 'An unexpected error occurred', description: errorMessage });
     } finally {
-        setIsGenerating(false);
+        if (!isStale(genId)) {
+            setIsGenerating(false);
+            setGenerationStep(null);
+        }
     }
   };
 
   const handleCreateManualTemplate = () => {
     if (!isLoaded) return;
 
-    const targetProjectId = activeProjectId || 'unassigned';
-    const targetProject = projects.find(p => p.id === targetProjectId);
-
-    if (!targetProject) {
-        toast({ variant: 'destructive', title: 'Error', description: 'Could not find a folder to add the template to.' });
-        return;
-    }
+    const targetProject = getTargetProject();
+    if (!targetProject) return;
+    const targetProjectId = targetProject.id;
     
     const createSubSubTask = (text: string, parentId: string, order: number): Task => ({
         id: crypto.randomUUID(), text, completed: false, status: 'todo', subtasks: [], lastEdited: Date.now(),
@@ -796,7 +884,7 @@ export default function Home() {
     
     toast({ title: 'Generating summary...', description: `The AI is analyzing "${'name' in itemToSummarize ? itemToSummarize.name : itemToSummarize.text}".` });
     
-    const result = await handleGenerateProjectSummary(activeProject, activeTask || undefined, latestSummary);
+    const result = await handleGenerateProjectSummary(activeProject, activeTask || undefined, latestSummary, aiSettings);
     
      if (result.success && result.summary) {
         if (activeTask) {
@@ -820,22 +908,34 @@ export default function Home() {
     setExecutionInput('');
   };
 
+  const [isExecuting, setIsExecuting] = useState(false);
+
   const handleExecuteTask = async () => {
     if (executingTask && activeProject) {
+      const genId = startGeneration();
+      setIsExecuting(true);
+      setGenerationStep('Executing scope...');
+
       const isUnassigned = activeProject.id === 'unassigned';
       const taskPath = findTaskPath(activeProject.tasks, executingTask.id);
       const parentTask = taskPath.length > 1 ? taskPath[taskPath.length - 2] : null;
       const siblingTasks = parentTask ? parentTask.subtasks : activeProject.tasks;
       const otherTasks = isUnassigned ? [] : siblingTasks.map(t => t.text).filter(t => t !== executingTask.text);
-      
+
       const success = await executeTask(
-          activeProject.id, 
-          executingTask.id, 
+          activeProject.id,
+          executingTask.id,
           executingTask.text,
           executionInput,
           isUnassigned ? undefined : activeProject.name,
-          otherTasks
+          otherTasks,
+          aiSettings
       );
+
+      setIsExecuting(false);
+      if (isStale(genId)) return;
+      setIsGenerating(false);
+      setGenerationStep(null);
 
       if (success) {
           toast({ title: 'Scope executed!', description: 'The results have been added to the Execution tab.', variant: 'default' });
@@ -847,14 +947,6 @@ export default function Home() {
     }
   };
 
-  const handleDeleteSelected = () => {
-    if(activeProjectId && selectedTaskIds.length > 0) {
-        if(deleteSelectedTasks(activeProjectId, selectedTaskIds)) {
-            toast({ title: `${selectedTaskIds.length} scope(s) deleted`, variant: 'default' });
-        }
-    }
-  };
-  
   const viewOptions: Record<string, { label: string; icon: React.ElementType; hidden?: boolean }> = {
     'list': { label: 'List View', icon: ListTree },
     'mindmap': { label: 'Mind Map', icon: Waypoints },
@@ -864,7 +956,14 @@ export default function Home() {
     'summary': { label: 'Summary', icon: FileText },
   };
 
-  const visibleViewOptions = Object.entries(viewOptions).filter(([, { hidden }]) => !hidden);
+  const sectionViews: Record<'brainstorm' | 'plan', string[]> = {
+    brainstorm: ['list', 'mindmap', 'execution', 'comments', 'summary'],
+    plan: ['list', 'kanban', 'execution', 'comments', 'summary'],
+  };
+
+  const visibleViewOptions = Object.entries(viewOptions).filter(
+    ([key, { hidden }]) => !hidden && sectionViews[activeSection].includes(key)
+  );
   
     // Human-readable preview for confirmation: pretty JSON
     const renderConfirmationJson = (data: any) => {
@@ -909,10 +1008,69 @@ export default function Home() {
       toast({ title: 'Exporting project...', description: `"${project.name}" is being prepared for download.` });
   };
 
+  const handleExportJson = () => {
+    if (!activeProject) return;
+    const data = JSON.stringify(activeProject, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    saveAs(blob, `${activeProject.name}.json`);
+    toast({ title: 'Exported as JSON' });
+  };
+
+  const handleImportJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const imported = JSON.parse(ev.target?.result as string) as Project;
+        if (!imported.name || !imported.tasks) {
+          toast({ variant: 'destructive', title: 'Invalid JSON', description: 'The file does not contain a valid project.' });
+          return;
+        }
+        // Create as new project with fresh ID
+        const newId = createProject(imported.name);
+        if (newId) {
+          const newProject = projects.find(p => p.id === newId);
+          if (newProject) {
+            updateProject({ ...newProject, tasks: imported.tasks, description: imported.description });
+            setActiveItem({ projectId: newId, taskId: null });
+            toast({ title: `Imported "${imported.name}"` });
+          }
+        }
+      } catch {
+        toast({ variant: 'destructive', title: 'Import failed', description: 'Could not parse the JSON file.' });
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const jsonImportRef = useRef<HTMLInputElement>(null);
+
+  // Filter tasks by status and source
+  const filterTasks = useCallback((tasks: Task[]): Task[] => {
+    return tasks.reduce<Task[]>((acc, task) => {
+      const statusMatch = statusFilter === 'all' || task.status === statusFilter;
+      const sourceMatch = sourceFilter === 'all' || task.source === sourceFilter;
+      const filteredSubtasks = task.subtasks?.length ? filterTasks(task.subtasks) : [];
+      if (statusMatch && sourceMatch) {
+        acc.push({ ...task, subtasks: filteredSubtasks });
+      } else if (filteredSubtasks.length > 0) {
+        acc.push({ ...task, subtasks: filteredSubtasks });
+      }
+      return acc;
+    }, []);
+  }, [statusFilter, sourceFilter]);
+
+  const hasActiveFilters = statusFilter !== 'all' || sourceFilter !== 'all';
+
   if (authLoading && !isLoaded) {
     return (
         <div className="flex h-screen w-full items-center justify-center bg-background">
-            <Loader2 className="h-16 w-16 animate-spin text-primary" />
+            <div className="flex flex-col items-center gap-4">
+                <Loader2 className="h-12 w-12 animate-spin text-primary" />
+                <p className="text-sm text-muted-foreground">Loading your workspace...</p>
+            </div>
         </div>
     );
   }
@@ -1031,6 +1189,11 @@ export default function Home() {
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
+                        <Button variant="outline" size="sm" className="h-8 gap-2 text-muted-foreground" onClick={() => setIsSearchOpen(true)} title="Search (Ctrl+K)">
+                            <Search className="h-4 w-4" />
+                            <span className="hidden sm:inline">Search</span>
+                            <kbd className="hidden sm:inline-flex h-5 items-center gap-1 rounded border bg-muted px-1.5 text-[10px] font-medium">⌘K</kbd>
+                        </Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => undo()} disabled={!canUndo} title="Undo (Ctrl+Z)">
                             <RotateCcw className="h-4 w-4" />
                         </Button>
@@ -1058,7 +1221,7 @@ export default function Home() {
                                             <Settings className="mr-2"/> Settings
                                         </DropdownMenuItem>
                                         <DropdownMenuItem onClick={() => setIsHelpOpen(true)}>
-                                            <HelpCircle className="mr-2"/> Help
+                                            <HelpCircle className="mr-2"/> Guide
                                         </DropdownMenuItem>
                                         <DropdownMenuSeparator />
                                         <DropdownMenuItem onClick={logOut}>
@@ -1104,6 +1267,73 @@ export default function Home() {
                 <div>
                      {isLoaded && activeProject && (
                         <div className="mb-4">
+                            {/* Section toggle: Brainstorm vs Plan */}
+                            <div className="flex items-center gap-2 mb-3">
+                                <div className="inline-flex h-9 items-center rounded-lg bg-muted p-1 text-muted-foreground">
+                                    <button
+                                        onClick={() => setActiveSection('brainstorm')}
+                                        className={cn(
+                                            "inline-flex items-center justify-center rounded-md px-3 py-1 text-sm font-medium transition-all",
+                                            activeSection === 'brainstorm'
+                                                ? "bg-background text-foreground shadow-sm"
+                                                : "hover:text-foreground"
+                                        )}
+                                    >
+                                        <Lightbulb className="mr-2 h-4 w-4" />
+                                        Brainstorm
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveSection('plan')}
+                                        className={cn(
+                                            "inline-flex items-center justify-center rounded-md px-3 py-1 text-sm font-medium transition-all",
+                                            activeSection === 'plan'
+                                                ? "bg-background text-foreground shadow-sm"
+                                                : "hover:text-foreground"
+                                        )}
+                                    >
+                                        <ClipboardList className="mr-2 h-4 w-4" />
+                                        Plan
+                                    </button>
+                                </div>
+                            </div>
+                            {/* Toolbar: filters + import/export */}
+                            <div className="flex items-center gap-2 mb-3 flex-wrap">
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <Button variant="outline" size="sm" className={cn("h-8 gap-1", hasActiveFilters && "border-primary text-primary")}>
+                                            <Filter className="h-3.5 w-3.5" />
+                                            Filter
+                                            {hasActiveFilters && <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">ON</Badge>}
+                                        </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="start">
+                                        <DropdownMenuLabel>Status</DropdownMenuLabel>
+                                        {(['all', 'todo', 'inprogress', 'done'] as const).map(s => (
+                                            <DropdownMenuItem key={s} onClick={() => setStatusFilter(s)} className={cn(statusFilter === s && "font-semibold bg-accent")}>
+                                                {s === 'all' ? 'All' : s === 'todo' ? 'To Do' : s === 'inprogress' ? 'In Progress' : 'Done'}
+                                            </DropdownMenuItem>
+                                        ))}
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuLabel>Source</DropdownMenuLabel>
+                                        {(['all', 'ai', 'manual'] as const).map(s => (
+                                            <DropdownMenuItem key={s} onClick={() => setSourceFilter(s)} className={cn(sourceFilter === s && "font-semibold bg-accent")}>
+                                                {s === 'all' ? 'All' : s === 'ai' ? 'AI Generated' : 'Manual'}
+                                            </DropdownMenuItem>
+                                        ))}
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                                <div className="ml-auto flex items-center gap-1">
+                                    <input type="file" ref={jsonImportRef} className="hidden" accept=".json" onChange={handleImportJson} />
+                                    <Button variant="ghost" size="sm" className="h-8 gap-1" onClick={() => jsonImportRef.current?.click()} title="Import JSON">
+                                        <Upload className="h-3.5 w-3.5" />
+                                        <span className="hidden sm:inline">Import</span>
+                                    </Button>
+                                    <Button variant="ghost" size="sm" className="h-8 gap-1" onClick={handleExportJson} disabled={!activeProject} title="Export JSON">
+                                        <Download className="h-3.5 w-3.5" />
+                                        <span className="hidden sm:inline">Export</span>
+                                    </Button>
+                                </div>
+                            </div>
                             {/* Tabs for larger screens */}
                             <div className="hidden md:block">
                                 <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -1153,16 +1383,25 @@ export default function Home() {
 
                             />
                              <div className="flex w-full md:w-auto items-center justify-end gap-2 flex-shrink-0">
-                                <Button size="icon" type="submit" disabled={isGenerating || !goal.trim() || !isLoaded}>
-                                    {isGenerating ? <Loader2 className="animate-spin" /> : <Plus />}
-                                </Button>
-                                <Button size="icon" type="button" onClick={() => fileInputRef.current?.click()} disabled={isGenerating}>
-                                    <ImagePlus />
-                                </Button>
-                                <Button onClick={handleCreateManualTemplate} disabled={!isLoaded}>
-                                    <FilePlus2 />
-                                    <span>Blank Template</span>
-                                </Button>
+                                {isGenerating ? (
+                                    <Button size="sm" variant="destructive" type="button" onClick={cancelGeneration}>
+                                        <X className="mr-1 h-4 w-4" />
+                                        Cancel
+                                    </Button>
+                                ) : (
+                                    <>
+                                        <Button size="icon" type="submit" disabled={!goal.trim() || !isLoaded}>
+                                            <Plus />
+                                        </Button>
+                                        <Button size="icon" type="button" onClick={() => fileInputRef.current?.click()}>
+                                            <ImagePlus />
+                                        </Button>
+                                        <Button onClick={handleCreateManualTemplate} disabled={!isLoaded}>
+                                            <FilePlus2 />
+                                            <span>Blank Template</span>
+                                        </Button>
+                                    </>
+                                )}
                              </div>
                         </div>
                         <input
@@ -1186,6 +1425,17 @@ export default function Home() {
                             </div>
                         )}
                     </form>
+
+                    {isGenerating && generationStep && !isConfirmationDialogOpen && !executingTask && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4 p-3 rounded-lg border bg-muted/50 animate-pulse">
+                            <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                            <span className="flex-grow">{generationStep}</span>
+                            <Button variant="ghost" size="sm" className="h-7 text-destructive hover:text-destructive" onClick={cancelGeneration}>
+                                <X className="h-4 w-4 mr-1" />
+                                Cancel
+                            </Button>
+                        </div>
+                    )}
 
                     {isLoaded && activeProject ? (
                         <div className="flex items-center text-sm text-muted-foreground mb-4 flex-wrap">
@@ -1218,8 +1468,8 @@ export default function Home() {
                                 ))}
                             </TabsList>
                             <TabsContent value="list">
-                                <TreeView 
-                                    tasks={activeTask ? [activeTask] : activeProject.tasks}
+                                <TreeView
+                                    tasks={filterTasks(activeTask ? [activeTask] : activeProject.tasks)}
                                     project={activeProject}
                                     allProjects={projects}
                                     selectedTaskIds={selectedTaskIds}
@@ -1251,56 +1501,59 @@ export default function Home() {
                                     sortOption={taskSortOption}
                                     onSetSortOption={setTaskSortOption}
                                     recentlyChanged={recentlyChanged}
-                                                                                                            onOpenSubscopeDialog={(task, isRegen) => {
-                                        // Open unified dialog pre-populated with the selected scope and mode
+                                    planMode={activeSection === 'plan'}
+                                    onOpenSubscopeDialog={(task, isRegen) => {
+                                        if (!activeProject) return;
+                                        const currentProject = activeProject;
                                         setRefinedGoal(task.text);
                                         setAiConfirmationResponse({ raw: task.text });
                                         setConfirmationInput('');
                                         setConfirmationImage(null);
                                         setConfirmationMode({ type: isRegen ? 'regenerate' : 'subscope', targetTaskId: task.id });
-                                                                                                                    setProposal(''); // placeholder while loading
-                                                                                                                    setIsConfirmationDialogOpen(true);
-                                                                                                                    // Fetch proposal preview async
-                                                                                                                    (async () => {
-                                                                                    const siblings = (task.parentId ? findTaskPath((activeProject as Project).tasks, task.parentId).at(-1)?.subtasks || [] : (activeProject as Project).tasks).filter(t => t.id !== task.id).map(t => t.text);
-                                                                                    const existingChildren = (task.subtasks || []).map(t => t.text);
-                                                                                    const parentPathTitles = findTaskPath((activeProject as Project).tasks, task.id).map(t => t.text).slice(0, -1);
-                                                                                    const res = await handleProposeChanges({
-                                                                                        mode: isRegen ? 'regenerate' : 'subscope',
-                                                                                        targetText: task.text,
-                                                                                        projectName: activeProject?.name,
-                                                                                        parentPathTitles,
-                                                                                        siblingTitles: siblings,
-                                                                                        existingChildren,
-                                                                                    });
-                                                                                                                        if (res.success && res.data) setProposal(res.data);
-                                                                                                                        else setProposal(null);
-                                                                                })();
+                                        setProposal('');
+                                        setIsConfirmationDialogOpen(true);
+                                        (async () => {
+                                            const siblings = (task.parentId ? findTaskPath(currentProject.tasks, task.parentId).at(-1)?.subtasks || [] : currentProject.tasks).filter(t => t.id !== task.id).map(t => t.text);
+                                            const existingChildren = (task.subtasks || []).map(t => t.text);
+                                            const parentPathTitles = findTaskPath(currentProject.tasks, task.id).map(t => t.text).slice(0, -1);
+                                            const res = await handleProposeChanges({
+                                                mode: isRegen ? 'regenerate' : 'subscope',
+                                                targetText: task.text,
+                                                projectName: currentProject.name,
+                                                parentPathTitles,
+                                                siblingTitles: siblings,
+                                                existingChildren,
+                                                aiSettings,
+                                            });
+                                            if (res.success && res.data) setProposal(res.data);
+                                            else setProposal(null);
+                                        })();
                                     }}
                                     onOpenRephraseDialog={(task) => {
+                                        if (!activeProject) return;
+                                        const currentProject = activeProject;
                                         setRefinedGoal(task.text);
                                         setAiConfirmationResponse({ raw: task.text });
                                         setConfirmationInput('');
                                         setConfirmationImage(null);
-                                        // Switch to 'alternative' behavior replacing the node and updating related items
-                                                                                setConfirmationMode({ type: 'alternative', targetTaskId: task.id });
-                                                                                                                    setProposal('');
-                                                                                                                    setIsConfirmationDialogOpen(true);
-                                                                                                                    // Proposal for alternative
-                                                                                                                    (async () => {
-                                                                                    const path = findTaskPath((activeProject as Project).tasks, task.id);
-                                                                                    const parentTitles = path.map(t => t.text).slice(0, -1);
-                                                                                    const siblings = (task.parentId ? findTaskPath((activeProject as Project).tasks, task.parentId).at(-1)?.subtasks || [] : (activeProject as Project).tasks).filter(t => t.id !== task.id).map(t => t.text);
-                                                                                    const res = await handleProposeChanges({
-                                                                                        mode: 'alternative',
-                                                                                        targetText: task.text,
-                                                                                        projectName: activeProject?.name,
-                                                                                        parentPathTitles: parentTitles,
-                                                                                        siblingTitles: siblings,
-                                                                                    });
-                                                                                                                        if (res.success && res.data) setProposal(res.data);
-                                                                                                                        else setProposal(null);
-                                                                                })();
+                                        setConfirmationMode({ type: 'alternative', targetTaskId: task.id });
+                                        setProposal('');
+                                        setIsConfirmationDialogOpen(true);
+                                        (async () => {
+                                            const path = findTaskPath(currentProject.tasks, task.id);
+                                            const parentTitles = path.map(t => t.text).slice(0, -1);
+                                            const siblings = (task.parentId ? findTaskPath(currentProject.tasks, task.parentId).at(-1)?.subtasks || [] : currentProject.tasks).filter(t => t.id !== task.id).map(t => t.text);
+                                            const res = await handleProposeChanges({
+                                                mode: 'alternative',
+                                                targetText: task.text,
+                                                projectName: currentProject.name,
+                                                parentPathTitles: parentTitles,
+                                                siblingTitles: siblings,
+                                                aiSettings,
+                                            });
+                                            if (res.success && res.data) setProposal(res.data);
+                                            else setProposal(null);
+                                        })();
                                     }}
                                 />
                             </TabsContent>
@@ -1373,10 +1626,24 @@ export default function Home() {
                         <div className="text-center text-muted-foreground mt-16 border-2 border-dashed rounded-lg p-12">
                         {isLoaded ? (
                             <>
-                                <h3 className='text-xl font-semibold mb-2'>Welcome to Scope</h3>
-                                <p className="mb-4">Scope out. Dive Deep. Complete.</p>
-                                <p>Select a folder from the sidebar to view its scopes.</p>
-                                <p className='mt-2'>Or, type a new scope above to get started!</p>
+                                <Lightbulb className="mx-auto h-10 w-10 mb-4 text-primary/50" />
+                                <h3 className='text-xl font-semibold mb-2 text-foreground'>Welcome to Scope</h3>
+                                <p className="mb-4">Break down any idea into structured, actionable pieces.</p>
+                                <div className="flex flex-col gap-2 max-w-xs mx-auto text-sm">
+                                    <p>1. Select or create a folder from the sidebar</p>
+                                    <p>2. Type a goal above and let AI decompose it</p>
+                                    <p>3. Explore, execute, and synthesize</p>
+                                </div>
+                                <div className="mt-4 flex justify-center gap-2">
+                                    <Button variant="outline" size="sm" onClick={() => setIsSidebarOpen(true)}>
+                                        <LayoutPanelLeft className="mr-2 h-4 w-4" />
+                                        Open Sidebar
+                                    </Button>
+                                    <Button variant="outline" size="sm" onClick={() => setIsSearchOpen(true)}>
+                                        <Search className="mr-2 h-4 w-4" />
+                                        Search Scopes
+                                    </Button>
+                                </div>
                             </>
                         ) : (
                             <>
@@ -1388,103 +1655,29 @@ export default function Home() {
                     )}
                 </div>
             </main>
+            {/* Mobile bottom tab bar */}
+            {isLoaded && activeProject && (
+              <nav className="md:hidden border-t bg-background flex items-center justify-around py-1 px-1 shrink-0">
+                {visibleViewOptions.map(([key, { label, icon: Icon }]) => (
+                  <button
+                    key={key}
+                    onClick={() => setActiveTab(key)}
+                    className={cn(
+                      "flex flex-col items-center gap-0.5 px-2 py-1 text-[10px] rounded-md transition-colors",
+                      activeTab === key ? "text-primary bg-primary/10" : "text-muted-foreground"
+                    )}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {label.split(' ')[0]}
+                  </button>
+                ))}
+              </nav>
+            )}
         </div>
-        <Dialog open={isHelpOpen} onOpenChange={setIsHelpOpen}>
-            <DialogContent className="max-w-2xl h-[90vh] flex flex-col">
-                 <DialogHeader>
-                    <DialogTitle>Help & Information</DialogTitle>
-                    <DialogDescription>
-                        Learn how to use Scope to its full potential.
-                    </DialogDescription>
-                </DialogHeader>
-                <ScrollArea className="flex-grow pr-6 -mr-6">
-                    <Accordion type="single" collapsible className="w-full">
-                        <AccordionItem value="item-1">
-                            <AccordionTrigger>What is Scope?</AccordionTrigger>
-                            <AccordionContent>
-                            Scope is a tool for breaking down complex goals into manageable, hierarchical scopes. Use it to plan projects, create checklists, brainstorm ideas, and more. The application leverages AI to help you generate, refine, and execute these scopes, turning high-level ideas into actionable plans.
-                            </AccordionContent>
-                        </AccordionItem>
-                        <AccordionItem value="item-2">
-                            <AccordionTrigger>Folders & Scopes</AccordionTrigger>
-                            <AccordionContent className="space-y-2">
-                                <p><strong className="font-semibold">Folders:</strong> ( <Folder className="inline-block" /> ) Represent high-level projects or containers for your work. You can create, rename, and sort them in the sidebar.</p>
-                                <p><strong className="font-semibold">Scopes:</strong> ( <File className="inline-block" /> ) Are individual tasks or ideas. They can be nested to create a hierarchy. A scope with sub-scopes acts as a parent, and its status (To Do, In Progress, Done) is automatically calculated based on its children.</p>
-                                <p><strong className="font-semibold">Adding Scopes:</strong> Use the main input bar at the top. Type your goal and click "Add Scope". The AI will treat it as a case study, breaking it down into a structured list of sub-scopes for you.</p>
-                            </AccordionContent>
-                        </AccordionItem>
-                        <AccordionItem value="item-3">
-                            <AccordionTrigger>Using the AI</AccordionTrigger>
-                            <AccordionContent className="space-y-2">
-                                <p><strong className="font-semibold">Generate Scopes (Case Study Method):</strong> ( <Bot className="inline-block text-primary" /> ) The primary way to use the AI. Describe a goal, and the AI will act as a consultant, breaking it down into a hierarchical plan (L1, L2, L3...) and providing a synthesis.</p>
-                                <p><strong className="font-semibold">Execute:</strong> ( <ZapIcon className="inline-block text-yellow-500" /> ) On any scope, use the "Execute" action to have the AI perform a deep-dive case study on the topic and provide a detailed report. Results appear in the "Execution" view.</p>
-                                <p><strong className="font-semibold">Rephrase Scope Title:</strong> ( <Pencil className="inline-block text-cyan-500" /> ) Refine the text of a scope without changing its children.</p>
-                                <p><strong className="font-semibold">Generate Sub-scopes:</strong> ( <BrainCircuit className="inline-block text-primary" /> ) Ask AI to add new sub-scopes under a scope (append).</p>
-                                <p><strong className="font-semibold">Regenerate Sub-scopes:</strong> ( <RotateCw className="inline-block text-blue-500" /> ) Replace all existing sub-scopes under a scope with a fresh AI-generated set.</p>
-                            </AccordionContent>
-                        </AccordionItem>
-                        <AccordionItem value="item-4">
-                            <AccordionTrigger>Content Views</AccordionTrigger>
-                            <AccordionContent className="space-y-2">
-                                <p><strong className="font-semibold">List View:</strong> ( <List className="inline-block" /> ) The primary hierarchical view for managing your scopes.</p>
-                                <p><strong className="font-semibold">Mind Map:</strong> ( <MapIcon className="inline-block" /> ) A visual representation of your scope hierarchy, great for brainstorming and understanding relationships.</p>
-                                <p><strong className="font-semibold">Kanban View:</strong> ( <Columns className="inline-block" /> ) A board view organizing scopes by their status (To Do, In Progress, Done).</p>
-                                <p><strong className="font-semibold">Execution, Comments, Summary:</strong> These views show AI execution results, user comments, and AI-generated summaries for the selected folder or scope.</p>
-                            </AccordionContent>
-                        </AccordionItem>
-                    </Accordion>
-                </ScrollArea>
-                <DialogFooter className="pt-4 border-t">
-                    <Button onClick={() => setIsHelpOpen(false)}>Close</Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+        <HelpDialog open={isHelpOpen} onOpenChange={setIsHelpOpen} />
         <AuthDialog open={isAuthDialogOpen} onOpenChange={setIsAuthDialogOpen} />
-        <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
-        {/* Simple history info modal (list only; undo/redo are buttons in header) */}
-        <Dialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
-            <DialogContent className="max-w-md">
-                <DialogHeader>
-                    <DialogTitle>History</DialogTitle>
-                    <DialogDescription>Use Undo/Redo in the header to revert or reapply changes.</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-3">
-                    <div>
-                        <div className="text-xs uppercase text-muted-foreground mb-1">Past (oldest → newest)</div>
-                        <ul className="max-h-48 overflow-auto border rounded p-2 text-sm">
-                            {historyPast.length === 0 ? (
-                                <li className="text-muted-foreground">No history yet</li>
-                            ) : (
-                                historyPast.map((h, i) => (
-                                    <li key={i} className="py-1 border-b last:border-b-0">
-                                        <div className="font-medium">{h.label || 'Change'}</div>
-                                        <div className="text-xs text-muted-foreground">{new Date(h.timestamp).toLocaleString()}</div>
-                                    </li>
-                                ))
-                            )}
-                        </ul>
-                    </div>
-                    <div>
-                        <div className="text-xs uppercase text-muted-foreground mb-1">Future (will redo)</div>
-                        <ul className="max-h-24 overflow-auto border rounded p-2 text-sm">
-                            {historyFuture.length === 0 ? (
-                                <li className="text-muted-foreground">Empty</li>
-                            ) : (
-                                historyFuture.map((h, i) => (
-                                    <li key={i} className="py-1 border-b last:border-b-0">
-                                        <div className="font-medium">{h.label || 'Change'}</div>
-                                        <div className="text-xs text-muted-foreground">{new Date(h.timestamp).toLocaleString()}</div>
-                                    </li>
-                                ))
-                            )}
-                        </ul>
-                    </div>
-                </div>
-                <DialogFooter>
-                    <Button onClick={() => setIsHistoryOpen(false)}>Close</Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+        <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} aiSettings={aiSettings} onAiSettingsChange={setAiSettings} />
+        <HistoryDialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen} historyPast={historyPast} historyFuture={historyFuture} />
         <Dialog open={!!commentingTask} onOpenChange={(isOpen) => !isOpen && handleCloseCommentDialog()}>
             <DialogContent>
                 <DialogHeader>
@@ -1520,12 +1713,27 @@ export default function Home() {
                     placeholder="e.g., 'Focus on solutions for a small business' or 'Provide code examples in Python'."
                     rows={4}
                 />
+                {isExecuting && generationStep && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <span>{generationStep}</span>
+                    </div>
+                )}
                 <DialogFooter>
-                    <Button variant="ghost" onClick={handleCloseExecuteDialog}>Cancel</Button>
-                    <Button onClick={handleExecuteTask}>
-                        <Zap className="mr-2"/>
-                        Execute
-                    </Button>
+                    {isExecuting ? (
+                        <Button variant="destructive" onClick={() => { cancelGeneration(); setIsExecuting(false); handleCloseExecuteDialog(); }}>
+                            <X className="mr-1 h-4 w-4" />
+                            Stop execution
+                        </Button>
+                    ) : (
+                        <>
+                            <Button variant="ghost" onClick={handleCloseExecuteDialog}>Cancel</Button>
+                            <Button onClick={handleExecuteTask}>
+                                <Zap className="mr-2"/>
+                                Execute
+                            </Button>
+                        </>
+                    )}
                 </DialogFooter>
             </DialogContent>
         </Dialog>
@@ -1610,26 +1818,39 @@ export default function Home() {
                         )}
                     </div>
                 </div>
+                                                {generationStep && (
+                                                    <div className="flex items-center gap-2 text-sm text-muted-foreground animate-pulse mt-2">
+                                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                                        <span>{generationStep}</span>
+                                                    </div>
+                                                )}
                                                 <DialogFooter className="mt-4">
-                                                        <Button variant="ghost" onClick={() => setIsConfirmationDialogOpen(false)}>Cancel</Button>
-                                                        {isRefineMode ? (
-                                                            <Button onClick={handleAcceptConfirmation} disabled={isGenerating}>
-                                                                {isGenerating ? <Loader2 className="animate-spin" /> : 'Refine scope'}
+                                                        {isGenerating ? (
+                                                            <Button variant="destructive" onClick={cancelGeneration}>
+                                                                <X className="mr-1 h-4 w-4" />
+                                                                Stop generation
                                                             </Button>
                                                         ) : (
-                                                            <Button onClick={handleAcceptConfirmation} disabled={isGenerating}>
-                                                                {isGenerating ? (
-                                                                    <Loader2 className="animate-spin" />
-                                                                ) : confirmationMode.type === 'initial' ? (
-                                                                    'Accept & add scopes'
-                                                                ) : confirmationMode.type === 'subscope' ? (
-                                                                    'Accept & generate sub-scopes'
-                                                                ) : confirmationMode.type === 'regenerate' ? (
-                                                                    'Accept & regenerate sub-scopes'
+                                                            <>
+                                                                <Button variant="ghost" onClick={() => setIsConfirmationDialogOpen(false)}>Cancel</Button>
+                                                                {isRefineMode ? (
+                                                                    <Button onClick={handleAcceptConfirmation}>
+                                                                        Refine scope
+                                                                    </Button>
                                                                 ) : (
-                                                                    'Accept & replace with alternative'
+                                                                    <Button onClick={handleAcceptConfirmation}>
+                                                                        {confirmationMode.type === 'initial' ? (
+                                                                            'Accept & add scopes'
+                                                                        ) : confirmationMode.type === 'subscope' ? (
+                                                                            'Accept & generate sub-scopes'
+                                                                        ) : confirmationMode.type === 'regenerate' ? (
+                                                                            'Accept & regenerate sub-scopes'
+                                                                        ) : (
+                                                                            'Accept & replace with alternative'
+                                                                        )}
+                                                                    </Button>
                                                                 )}
-                                                            </Button>
+                                                            </>
                                                         )}
                                                 </DialogFooter>
             </DialogContent>
@@ -1662,6 +1883,15 @@ export default function Home() {
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+        <SearchModal
+          open={isSearchOpen}
+          onOpenChange={setIsSearchOpen}
+          projects={projects}
+          onSelect={(sel) => {
+            setActiveItem(sel);
+            setIsSearchOpen(false);
+          }}
+        />
     </div>
     </TooltipProvider>
   );

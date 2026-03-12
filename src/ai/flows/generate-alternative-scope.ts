@@ -1,6 +1,7 @@
 "use server";
 
 import { generateContentBlocks } from "@/ai/claude";
+import { type AiSettings } from '@/ai/ai-settings';
 
 export type DependencyCandidate = {
   id: string;
@@ -15,7 +16,7 @@ export type AlternativeScopeInput = {
     id: string;
     text: string;
     description?: string;
-    subtasks?: Array<{ text: string; description?: string; subtasks?: any[] }>;
+    subtasks?: Array<{ text: string; description?: string; subtasks?: unknown[] }>;
   };
   parentPathTitles: string[]; // e.g., ["Menu Planning", "Course Selection"]
   siblingTitles: string[]; // for duplication avoidance
@@ -26,20 +27,21 @@ export type AlternativeScopeInput = {
 
   // Context control
   projectName?: string;
-  fullProjectJson?: any; // optionally include the whole JSON when dependencies exist
-  trimmedContext?: any; // smaller payload when not needed
+  fullProjectJson?: unknown; // optionally include the whole JSON when dependencies exist
+  trimmedContext?: unknown; // smaller payload when not needed
+  aiSettings?: AiSettings;
 };
 
 export type AlternativeScopeOutput = {
   // Outline for the new node, using the standard outline rules
-  NewTaskOutline: any;
+  NewTaskOutline: Record<string, unknown>;
   // Minimal patches to related items
   Updates: Array<{
     "Target Id": string;
     Changes: Array<{
       Path: string; // JSON Pointer to field, e.g., "/text" or "/description"
       Op: "replace" | "update";
-      Value: any;
+      Value: string;
       Reason?: string;
     }>;
   }>;
@@ -120,6 +122,7 @@ This response MUST contain exactly three top-level keys:
     user: userBlocks,
     maxTokens: 4000,
     temperature: 0.2,
+    aiSettings: input.aiSettings,
   });
 
   // Helper: strip common code fences if they appear
@@ -142,8 +145,8 @@ This response MUST contain exactly three top-level keys:
   if (!parsed || typeof parsed !== "object") throw new Error("Invalid JSON");
 
   // Normalize output into the strict AlternativeScopeOutput shape
-  const normalize = (j: any): AlternativeScopeOutput => {
-    const out: any = {};
+  const normalize = (j: Record<string, unknown>): AlternativeScopeOutput => {
+    const out: Record<string, unknown> = {};
     // Outline: tolerate either key, prefer typed NewTaskOutline
     out.NewTaskOutline = j.NewTaskOutline ?? j["New Task Outline"];
 
@@ -155,21 +158,24 @@ This response MUST contain exactly three top-level keys:
         : [];
 
     const allowedPaths = new Set(["/text", "/description"]);
-    const normUpdates = [] as Array<{ "Target Id": string; Changes: any[] }>;
+    type ChangeEntry = { Path: string; Op: "replace" | "update"; Value: string; Reason?: string };
+    const normUpdates = [] as Array<{ "Target Id": string; Changes: ChangeEntry[] }>;
     for (const u of rawUpdates) {
       if (!u || typeof u !== "object") continue;
-      const targetId = u["Target Id"] ?? u["TargetID"] ?? u["TargetId"] ?? u["targetId"] ?? u["target_id"];
+      const uObj = u as Record<string, unknown>;
+      const targetId = (uObj["Target Id"] ?? uObj["TargetID"] ?? uObj["TargetId"] ?? uObj["targetId"] ?? uObj["target_id"]) as string | undefined;
       if (!targetId || typeof targetId !== "string") continue;
-      const changesSrc = Array.isArray(u.Changes) ? u.Changes : Array.isArray(u.changes) ? u.changes : [];
-      const changes = [] as any[];
+      const changesSrc = Array.isArray(uObj.Changes) ? uObj.Changes : Array.isArray(uObj.changes) ? uObj.changes : [];
+      const changes: ChangeEntry[] = [];
       for (const c of changesSrc) {
         if (!c || typeof c !== "object") continue;
-        const path = (c.Path ?? c.path ?? "").toString().trim();
+        const cObj = c as Record<string, unknown>;
+        const path = ((cObj.Path ?? cObj.path ?? "") as string).toString().trim();
         if (!allowedPaths.has(path)) continue;
-        const opRaw = (c.Op ?? c.op ?? "replace").toString().toLowerCase();
+        const opRaw = ((cObj.Op ?? cObj.op ?? "replace") as string).toString().toLowerCase();
         const Op: "replace" | "update" = opRaw === "update" ? "update" : "replace";
-        const entry: any = { Path: path, Op, Value: c.Value };
-        if (c.Reason ?? c.reason) entry.Reason = c.Reason ?? c.reason;
+        const entry: ChangeEntry = { Path: path, Op, Value: cObj.Value as string };
+        if (cObj.Reason ?? cObj.reason) entry.Reason = (cObj.Reason ?? cObj.reason) as string;
         changes.push(entry);
       }
       if (changes.length) {
@@ -179,7 +185,7 @@ This response MUST contain exactly three top-level keys:
     out.Updates = normUpdates;
 
     // Changes Summary: ensure minimal object exists
-    const summary = j["Changes Summary"] ?? j["changes summary"] ?? j["ChangesSummary"]; 
+    const summary = j["Changes Summary"] ?? j["changes summary"] ?? j["ChangesSummary"];
     if (summary && typeof summary === "object") {
       out["Changes Summary"] = summary;
     } else {

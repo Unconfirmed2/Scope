@@ -244,3 +244,57 @@ export function countCommentsRecursively(tasks: Task[]): number {
     }
     return count;
 }
+
+export type FormatTextOptions = {
+    numbered?: boolean;
+    includeStatus?: boolean;
+    includeDescription?: boolean;
+};
+
+/**
+ * Format a single task and its subtree as indented text (using tabs).
+ * When `numbered` is true, uses outline numbering: 1. / 1.1. / 1.1.1.
+ * `numberPrefix` is used internally for recursion — callers pass `siblingIndex`
+ * to set the 1-based position of this task among its siblings.
+ */
+export function formatTaskToText(
+    task: Task,
+    level: number,
+    options: FormatTextOptions,
+    siblingIndex: number = 1,
+    parentNumber: string = '',
+): string {
+    const indent = '\t'.repeat(level);
+    const number = parentNumber ? `${parentNumber}${siblingIndex}.` : `${siblingIndex}.`;
+
+    let line = indent;
+    if (options.numbered) {
+        line += `${number} `;
+    } else {
+        line += '- ';
+    }
+    if (options.includeStatus) {
+        line += task.status === 'done' ? '[x] ' : '[ ] ';
+    }
+    line += task.text + '\n';
+
+    if (options.includeDescription && task.description) {
+        const descIndent = '\t'.repeat(level + 1);
+        line += descIndent + task.description.replace(/\n/g, '\n' + descIndent) + '\n';
+    }
+
+    if (task.subtasks && task.subtasks.length > 0) {
+        task.subtasks.forEach((subtask, i) => {
+            line += formatTaskToText(subtask, level + 1, options, i + 1, options.numbered ? number : '');
+        });
+    }
+
+    return line;
+}
+
+/**
+ * Format an array of tasks as indented text. Convenience wrapper around formatTaskToText.
+ */
+export function formatTasksToText(tasks: Task[], options: FormatTextOptions): string {
+    return tasks.map((task, i) => formatTaskToText(task, 0, options, i + 1)).join('');
+}

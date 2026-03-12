@@ -23,7 +23,7 @@ export type RegenerateTaskOutput = z.infer<typeof RegenerateTaskOutputSchema>;
 
 async function regenerateTaskFlow(input: RegenerateTaskInput): Promise<RegenerateTaskOutput> {
   const validated = RegenerateTaskInputSchema.parse(input);
-  let systemPrompt = `You are an expert at refining and clarifying goals. Your job is to rewrite a scope to be more effective, based on the original text and user feedback.
+  const systemPrompt = `You are an expert at refining and clarifying goals. Your job is to rewrite a scope to be more effective, based on the original text and user feedback.
 
 Rewrite the scope based on the original and the feedback. If feedback is provided, prioritize it. The new scope should be a single, concise sentence. Do not output anything else.
 

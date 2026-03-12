@@ -3,7 +3,7 @@
 import { useState, useCallback, useContext, createContext, useRef, useEffect, useMemo } from 'react';
 import type { Project, Task, AIStep, TaskStatus, SortOption } from '@/lib/types';
 import { cn } from '@/lib/utils';
-import { BrainCircuit, Trash2, RotateCw, FolderSymlink, ChevronRight, MoreHorizontal, PlusCircle, MessageSquare, Pencil, Zap, ArrowUp, ArrowDown, ClipboardCopy, CheckSquare, Square, Wand2 } from 'lucide-react';
+import { BrainCircuit, Trash2, RotateCw, FolderSymlink, ChevronRight, MoreHorizontal, PlusCircle, MessageSquare, Pencil, Zap, ArrowUp, ArrowDown, ClipboardCopy, CheckSquare, Square, Wand2, ListOrdered, Copy } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 // import { handleGenerateTasks } from '@/app/actions';
 import { Button } from './ui/button';
@@ -11,7 +11,8 @@ import Linkify from 'linkify-react';
 import { Input } from './ui/input';
 // import { Textarea } from './ui/textarea';
 import { Checkbox } from './ui/checkbox';
-import { countDirectSubtasks, sortTasksShallow, findTaskRecursive } from '@/lib/utils';
+import { countDirectSubtasks, sortTasksShallow, findTaskRecursive, formatTaskToText, formatTasksToText } from '@/lib/utils';
+import type { FormatTextOptions } from '@/lib/utils';
 // Persona feature removed
 // Legacy dialog removed; unified dialog lives in page component
 import {
@@ -59,6 +60,8 @@ type TreeViewProps = {
     onOpenRephraseDialog: (task: Task) => void;
     /** Optional: Row-level change indicators to highlight new/updated items */
     recentlyChanged?: Record<string, { kind: 'new' | 'updated'; at: number }>;
+    /** When true, show status markers, checkboxes, and progress counts. When false (brainstorm mode), hide them. */
+    planMode?: boolean;
 };
 
 // Context for managing tree state
@@ -142,25 +145,27 @@ const AddSubtaskForm = ({ parentId, onAdd, onCancel, placeholder, isSibling }: {
 }
 
 
-const TaskNode = ({ 
-    task, 
-    level, 
+const TaskNode = ({
+    task,
+    level,
     allProjects,
     project,
     selectedTaskIds,
     onToggleSelection,
     onUpdateTask,
-    onDeleteTask, 
+    onDeleteTask,
     onAddSubtask,
     onAddCommentClick,
     onExecuteClick,
-    
+
     sortOption,
     onOpenSubscopeDialog,
     onOpenRephraseDialog,
     recentlyChanged,
-}: { 
-    task: Task, 
+    planMode,
+    numbered,
+}: {
+    task: Task,
     level: number,
     allProjects: Project[],
     project: Project,
@@ -175,6 +180,8 @@ const TaskNode = ({
     onOpenSubscopeDialog: (task: Task, isRegeneration: boolean) => void;
     onOpenRephraseDialog: (task: Task) => void;
     recentlyChanged?: Record<string, { kind: 'new' | 'updated'; at: number }>;
+    planMode?: boolean;
+    numbered?: boolean;
 }) => {
   const { collapsedNodes, toggleNode } = useTreeState();
     const [isEditing, setIsEditing] = useState(false);
@@ -293,24 +300,17 @@ const TaskNode = ({
   };
 
   const handleCopyToClipboard = () => {
-    const formatTaskToString = (taskToFormat: Task, level: number): string => {
-        const indent = '  '.repeat(level);
-        const statusIcon = taskToFormat.status === 'done' ? '[x]' : '[ ]';
-        let output = `${indent}- ${statusIcon} ${taskToFormat.text}\n`;
-        
-        if (taskToFormat.description) {
-            const descriptionIndent = '  '.repeat(level + 1);
-            output += `${descriptionIndent}${taskToFormat.description.replace(/\n/g, `\n${descriptionIndent}`)}\n`;
-        }
-        if (taskToFormat.subtasks && taskToFormat.subtasks.length > 0) {
-            output += taskToFormat.subtasks.map(subtask => formatTaskToString(subtask, level + 1)).join('');
-        }
-        return output;
-    };
-    const textToCopy = formatTaskToString(task, 0);
+    const opts: FormatTextOptions = { numbered: !!numbered, includeStatus: !!planMode, includeDescription: true };
+    // Task itself is the root/title — numbering starts with its children
+    let textToCopy: string;
+    if (numbered && task.subtasks?.length) {
+      textToCopy = task.text + '\n' + formatTasksToText(task.subtasks, opts);
+    } else {
+      textToCopy = formatTaskToText(task, 0, opts);
+    }
     navigator.clipboard.writeText(textToCopy).then(() => {
         toast({ title: "Outline copied to clipboard!" });
-    }, (err) => {
+    }, () => {
         toast({ variant: "destructive", title: "Failed to copy", description: "Could not copy text to clipboard." });
     });
   };
@@ -325,6 +325,7 @@ const TaskNode = ({
     >
       <div className="relative flex items-start pr-2" style={{ paddingLeft: `${level * 1.5}rem` }}>
           <div className="flex items-start gap-2 flex-grow">
+            {planMode && (
             <Checkbox
                 id={`select-${task.id}`}
                 checked={isSelected}
@@ -333,6 +334,7 @@ const TaskNode = ({
                 onClick={(e) => e.stopPropagation()}
                 onCheckedChange={() => onToggleSelection(task.id, false)}
             />
+            )}
             
             <div 
               className={cn("w-4 h-4 shrink-0 transition-transform flex items-center justify-center cursor-pointer mt-1", !hasSubtasks && "invisible")}
@@ -344,9 +346,11 @@ const TaskNode = ({
             </div>
             
             <div className="flex-grow flex items-start gap-2">
+                {planMode && (
                 <div className="flex items-center gap-2 pt-1 shrink-0">
                     {statusSelector}
                 </div>
+                )}
 
                                 {isEditing ? (
                   <Input
@@ -360,8 +364,8 @@ const TaskNode = ({
                 ) : (
                   <span 
                     className={cn(
-                      'flex-grow whitespace-normal break-words pt-0.5', 
-                      task.completed && 'line-through text-muted-foreground',
+                      'flex-grow whitespace-normal break-words pt-0.5',
+                      planMode && task.completed && 'line-through text-muted-foreground',
                       task.description && 'cursor-pointer hover:text-primary/80'
                     )}
                     onDoubleClick={() => setIsEditing(true)}
@@ -433,7 +437,7 @@ const TaskNode = ({
                     </DropdownMenuContent>
                 </DropdownMenu>
             </div>
-             {hasSubtasks && (
+             {planMode && hasSubtasks && (
               <span className="text-xs text-muted-foreground ml-auto self-start pt-1 shrink-0 group-hover/task:opacity-0 transition-opacity pointer-events-none">
                 ({subtaskCounts.completed}/{subtaskCounts.total})
               </span>
@@ -477,6 +481,8 @@ const TaskNode = ({
               onOpenSubscopeDialog={onOpenSubscopeDialog}
               onOpenRephraseDialog={onOpenRephraseDialog}
           recentlyChanged={recentlyChanged}
+              planMode={planMode}
+              numbered={numbered}
             />
           ))}
         </div>
@@ -531,26 +537,11 @@ const TreeStateProvider = ({ children, tasks }: { children: React.ReactNode, tas
     );
 }
 
-export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSelectedTaskIds, onUpdateProject, onUpdateTaskAndPropagate, onMoveTask, onPromoteSubtask, onAddSubtask, onAddCommentClick, onExecuteClick, onDeleteTask, sortOption, onSetSortOption, onOpenSubscopeDialog, onOpenRephraseDialog, recentlyChanged }: TreeViewProps) {
+export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSelectedTaskIds, onUpdateProject, onUpdateTaskAndPropagate, onMoveTask, onPromoteSubtask, onAddSubtask, onAddCommentClick, onExecuteClick, onDeleteTask, sortOption, onSetSortOption, onOpenSubscopeDialog, onOpenRephraseDialog, recentlyChanged, planMode }: TreeViewProps) {
     const { toast } = useToast();
     const treeState = useContext(TreeStateContext);
     const lastClickedId = useRef<string | null>(null);
-    // Legacy generation state removed
-
-    const formatTaskToString = useCallback((taskToFormat: Task, level: number): string => {
-        const indent = '  '.repeat(level);
-        const statusIcon = taskToFormat.status === 'done' ? '[x]' : '[ ]';
-        let output = `${indent}- ${statusIcon} ${taskToFormat.text}\n`;
-        
-        if (taskToFormat.description) {
-            const descriptionIndent = '  '.repeat(level + 1);
-            output += `${descriptionIndent}${taskToFormat.description.replace(/\n/g, `\n${descriptionIndent}`)}\n`;
-        }
-        if (taskToFormat.subtasks && taskToFormat.subtasks.length > 0) {
-            output += taskToFormat.subtasks.map(subtask => formatTaskToString(subtask, level + 1)).join('');
-        }
-        return output;
-    }, []);
+    const [numbered, setNumbered] = useState(false);
 
     const handleUpdateTask = useCallback((updatedTask: Task) => {
         onUpdateTaskAndPropagate(project.id, updatedTask);
@@ -644,7 +635,7 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
     };
     
     // Only sort the highest-level scopes in the main page
-    const sortedTasks = sortTasksShallow(tasks, sortOption);
+    const sortedTasks = useMemo(() => sortTasksShallow(tasks, sortOption), [tasks, sortOption]);
     
     const allTaskIds = useMemo(() => {
         const ids: string[] = [];
@@ -668,21 +659,23 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
         }
     };
     
-    const selectedTasks = useMemo(() => {
-        const selected: Task[] = [];
-        const findSelected = (tasksToScan: Task[]) => {
-            for (const task of tasksToScan) {
-                if (selectedTaskIds.includes(task.id)) {
-                    selected.push(task);
-                }
-                if (task.subtasks) {
-                    findSelected(task.subtasks);
-                }
+    const taskMap = useMemo(() => {
+        const map = new Map<string, Task>();
+        const build = (tasksToScan: Task[]) => {
+            for (const t of tasksToScan) {
+                map.set(t.id, t);
+                if (t.subtasks) build(t.subtasks);
             }
         };
-        findSelected(tasks);
-        return selected;
-    }, [tasks, selectedTaskIds]);
+        build(tasks);
+        return map;
+    }, [tasks]);
+
+    const selectedTasks = useMemo(() => {
+        return selectedTaskIds
+            .map(id => taskMap.get(id))
+            .filter((t): t is Task => t !== undefined);
+    }, [taskMap, selectedTaskIds]);
     
     const canMoveSelected = useMemo(() => {
         if (selectedTasks.length === 0) return false;
@@ -738,19 +731,50 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                         {sortOption.direction === 'asc' ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
                     </Button>
                 </div>
-                 <div className="flex items-center gap-2">
+                 <div className="flex items-center gap-1">
+                    <Tooltip><TooltipTrigger asChild>
+                        <Button
+                            variant={numbered ? "secondary" : "ghost"}
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setNumbered(n => !n)}
+                            title={numbered ? 'Switch to bullets' : 'Switch to numbering'}
+                        >
+                            <ListOrdered className="h-4 w-4" />
+                        </Button>
+                    </TooltipTrigger><TooltipContent><p>{numbered ? 'Switch to bullets' : 'Switch to numbering'}</p></TooltipContent></Tooltip>
+                    <Tooltip><TooltipTrigger asChild>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => {
+                                const opts: FormatTextOptions = { numbered, includeStatus: !!planMode, includeDescription: true };
+                                const text = formatTasksToText(sortedTasks, opts);
+                                navigator.clipboard.writeText(text).then(
+                                    () => toast({ title: 'Outline copied to clipboard!' }),
+                                    () => toast({ variant: 'destructive', title: 'Failed to copy' }),
+                                );
+                            }}
+                            title="Copy all as text"
+                        >
+                            <Copy className="h-4 w-4" />
+                        </Button>
+                    </TooltipTrigger><TooltipContent><p>Copy all as text</p></TooltipContent></Tooltip>
+                    {planMode && (
                     <Button variant="ghost" size="sm" onClick={handleSelectAllToggle} title={areAllSelected ? "Deselect All" : "Select All"}>
                         {areAllSelected ? <Square className="h-4 w-4" /> : <CheckSquare className="h-4 w-4" />}
                         {areAllSelected ? 'Deselect All' : 'Select All'}
                     </Button>
+                    )}
                     <Button variant="ghost" size="sm" onClick={handleToggleAll} title={allCollapsed ? "Expand All" : "Collapse All"}>
-                    {allCollapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />} 
+                    {allCollapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
                     {allCollapsed ? 'Expand All' : 'Collapse All'}
                     </Button>
                 </div>
             </div>
 
-            {selectedTaskIds.length > 0 && (
+            {planMode && selectedTaskIds.length > 0 && (
                 <div className="bg-accent/20 border border-accent/50 rounded-lg p-2 mb-2 flex items-center justify-between gap-2">
                     <p className="text-sm font-semibold">{selectedTaskIds.length} scope(s) selected</p>
                     <div className="flex items-center gap-2">
@@ -758,7 +782,8 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                             <DropdownMenuTrigger asChild><Button size="sm" variant="outline">Actions</Button></DropdownMenuTrigger>
                             <DropdownMenuContent>
                                 <DropdownMenuItem onClick={() => {
-                                    const text = selectedTasks.map(t => formatTaskToString(t, 0)).join('\n');
+                                    const opts: FormatTextOptions = { numbered, includeStatus: !!planMode, includeDescription: true };
+                                    const text = formatTasksToText(selectedTasks, opts);
                                     navigator.clipboard.writeText(text);
                                     toast({title: 'Copied selected outlines!'});
                                 }}>
@@ -838,6 +863,8 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
                         onOpenRephraseDialog={onOpenRephraseDialog}
                         sortOption={sortOption}
                         recentlyChanged={recentlyChanged}
+                        planMode={planMode}
+                        numbered={numbered}
                     />
                 ))}
             </div>

@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import type { Project, Task, SortOption, SortKey } from '@/lib/types';
 import { Button } from './ui/button';
@@ -113,6 +113,10 @@ const SidebarTask = ({
               e.stopPropagation();
               onItemSelect({ projectId: project.id, taskId: task.id })
             }}
+            onDoubleClick={(e) => {
+              e.stopPropagation();
+              setEditingTaskId(task.id);
+            }}
           >
             <ChevronRight 
               className={cn("h-4 w-4 shrink-0 transition-transform cursor-pointer", 
@@ -191,10 +195,17 @@ const SidebarTask = ({
           </div>
           
            {hasSubtasks && (
-             <div className="w-full flex items-center gap-2 pl-5 pr-2">
-                <Progress value={taskProgress} className="h-1 flex-grow" />
-                <span className="text-xs text-muted-foreground shrink-0">{subtaskCounts.completed}/{subtaskCounts.total}</span>
-            </div>
+             <Tooltip>
+               <TooltipTrigger asChild>
+                 <div className="w-full flex items-center gap-2 pl-5 pr-2">
+                    <Progress value={taskProgress} className="h-1 flex-grow" />
+                    <span className="text-xs text-muted-foreground shrink-0">{subtaskCounts.completed}/{subtaskCounts.total}</span>
+                 </div>
+               </TooltipTrigger>
+               <TooltipContent>
+                 <p>{subtaskCounts.completed} of {subtaskCounts.total} sub-scopes completed ({Math.round(taskProgress)}%)</p>
+               </TooltipContent>
+             </Tooltip>
           )}
       </div>
       {!isCollapsed && hasSubtasks && (
@@ -229,13 +240,16 @@ export function Sidebar({
   isOpen, onSetIsOpen, width, projects, activeProjectId, activeTaskId, sortOption, onSetSortOption, onItemSelect, onCreateProject, onCreateTask, onDeleteProject, onUpdateProject, onDeleteTask, onMoveTask, onPromoteSubtask, onExportProject
 }: SidebarProps) {
   const { user, logOut } = useAuth();
-  const [newTaskName, setNewTaskName] = useState('');
   const [newProjectName, setNewProjectName] = useState('');
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>(() => {
+    try {
+      const stored = localStorage.getItem('sidebar_collapsed_projects');
+      if (stored) return JSON.parse(stored);
+    } catch { /* ignore */ }
     const initialState: Record<string, boolean> = {};
     projects.forEach(p => {
-      initialState[p.id] = true; // Start with all folders collapsed
+      initialState[p.id] = true;
     });
     return initialState;
   });
@@ -245,20 +259,17 @@ export function Sidebar({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    try {
+      localStorage.setItem('sidebar_collapsed_projects', JSON.stringify(collapsedProjects));
+    } catch { /* ignore */ }
+  }, [collapsedProjects]);
+
+  useEffect(() => {
     if (editingProjectId && inputRef.current) {
       inputRef.current.focus();
     }
   }, [editingProjectId])
 
-  const handleCreateTask = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (newTaskName.trim()) {
-      onCreateTask('unassigned', newTaskName.trim());
-      setNewTaskName('');
-      // Expand unassigned folder if it's collapsed
-      setCollapsedProjects(prev => ({...prev, 'unassigned': false}));
-    }
-  };
 
   const handleCreateProject = () => {
     if (newProjectName.trim()) {
@@ -403,6 +414,8 @@ export function Sidebar({
           const progress = calculateProjectProgress(project.tasks);
           const taskCounts = countDirectSubtasks(project.tasks);
           // Only sort top-level scopes; preserve child order from JSON
+          // Note: memoization happens at the component level via React reconciliation;
+          // per-project memoization requires extracting a sub-component (future optimization)
           const sortedTasks = sortTasksShallow(project.tasks, sortOption);
           const isProjectActive = project.id === activeProjectId && !activeTaskId;
           const isEditing = editingProjectId === project.id;
@@ -411,6 +424,7 @@ export function Sidebar({
             <div key={project.id} className="rounded-md bg-transparent group/project">
               <div
                 onClick={() => !isEditing && onItemSelect({ projectId: project.id, taskId: null })}
+                onDoubleClick={() => { if (!isUnassigned) setEditingProjectId(project.id); }}
                 className={cn(
                   "flex flex-col group p-2 rounded-md hover:bg-accent/20 cursor-pointer",
                    isProjectActive && !isEditing && "bg-background/50"
@@ -488,10 +502,17 @@ export function Sidebar({
                     </div>
                 </div>
 
-                 <div className="w-full pl-5 pr-2 mt-1">
-                      <Progress value={progress} className="h-1" />
-                      <span className="text-xs text-muted-foreground">{taskCounts.completed}/{taskCounts.total} scopes</span>
-                  </div>
+                 <Tooltip>
+                   <TooltipTrigger asChild>
+                     <div className="w-full pl-5 pr-2 mt-1">
+                          <Progress value={progress} className="h-1" />
+                          <span className="text-xs text-muted-foreground">{taskCounts.completed}/{taskCounts.total} scopes</span>
+                      </div>
+                   </TooltipTrigger>
+                   <TooltipContent>
+                     <p>{taskCounts.completed} of {taskCounts.total} scopes completed ({Math.round(progress)}%)</p>
+                   </TooltipContent>
+                 </Tooltip>
               </div>
               {!isCollapsed && (
                 <div className="pl-2 pr-2 py-1 space-y-1 min-h-[10px]">
@@ -522,19 +543,6 @@ export function Sidebar({
             </div>
           )
         })}
-      </div>
-      <div className="p-2 border-t">
-        <form onSubmit={handleCreateTask} className="flex gap-2">
-          <Input
-            value={newTaskName}
-            onChange={(e) => setNewTaskName(e.target.value)}
-            placeholder="New scope in Unassigned..."
-            className="bg-background text-foreground"
-          />
-          <Button type="submit" size="icon" variant="outline">
-            <Plus />
-          </Button>
-        </form>
       </div>
       </TooltipProvider>
     </aside>

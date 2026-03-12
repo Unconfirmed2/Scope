@@ -64,4 +64,3 @@ export type SortOption = {
     direction: SortDirection;
 };
 
-// Persona feature removed

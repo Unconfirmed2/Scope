@@ -8,6 +8,7 @@
  */
 
 import { generateContentBlocks } from '@/ai/claude';
+import { type AiSettings } from '@/ai/ai-settings';
 import { z } from 'zod';
 
 const ExecuteTaskInputSchema = z.object({
@@ -16,7 +17,7 @@ const ExecuteTaskInputSchema = z.object({
   projectName: z.string().optional().describe('The name of the folder this scope is part of.'),
   otherTasks: z.array(z.string()).optional().describe('A list of other scopes in the folder to provide context.'),
 });
-export type ExecuteTaskInput = z.infer<typeof ExecuteTaskInputSchema>;
+export type ExecuteTaskInput = z.infer<typeof ExecuteTaskInputSchema> & { aiSettings?: AiSettings };
 
 const ExecuteTaskOutputSchema = z.object({
   result: z.string().describe('A detailed case study and synthesis of the execution. Should be formatted in human-readable markdown using paragraphs and simple bullet points (using -).'),
@@ -52,7 +53,7 @@ Format: human-readable document (paragraphs, '-' bullets). Avoid '#' headers unl
   }
 
   if (validated.otherTasks && validated.otherTasks.length > 0) {
-    userPrompt += `\n<other_tasks>${validated.otherTasks.map(t=>`<task>${t}</task>`).join('')}</other_tasks>`;
+    userPrompt += `\n<other_tasks>${validated.otherTasks.map((t: string)=>`<task>${t}</task>`).join('')}</other_tasks>`;
   }
 
   userPrompt += `\n<final_instruction>Generate your full case study report now.</final_instruction></request>`;
@@ -62,6 +63,7 @@ Format: human-readable document (paragraphs, '-' bullets). Avoid '#' headers unl
     user: [{ text: userPrompt, cache: false }],
     maxTokens: 4000,
     temperature: 0.2,
+    aiSettings: input.aiSettings,
   });
   
   const result: ExecuteTaskOutput = {
