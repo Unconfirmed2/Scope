@@ -80,7 +80,7 @@ const CommentCard = ({
     };
     
     return (
-        <div className={cn("p-3 rounded-md text-sm border-l-2", statusColors[comment.status])} style={{marginLeft: `${level * 20}px`}}>
+        <div className={cn("p-3 rounded-md text-sm border-l-2", statusColors[comment.status], level === 1 && "ml-5", level === 2 && "ml-10", level === 3 && "ml-[3.75rem]", level >= 4 && "ml-20")}>
             <div className="flex justify-between items-start">
                 {isEditing ? (
                     <div className="flex-grow space-y-2">

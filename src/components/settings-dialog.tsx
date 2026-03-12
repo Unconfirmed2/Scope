@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, User, Users, KeyRound, Bell, Link as LinkIcon, LogOut, Camera, Bot } from 'lucide-react';
+import { Loader2, User, Users, KeyRound, Bell, Link as LinkIcon, LogOut, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from './ui/separator';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar';
@@ -238,21 +238,13 @@ export function SettingsDialog({ open, onOpenChange, aiSettings, onAiSettingsCha
                             <div className="space-y-8">
                                 <h2 className="text-2xl font-semibold">Personal information</h2>
                                 <div className="flex items-center gap-6">
-                                    <div className="relative">
-                                        <Avatar className="h-24 w-24">
-                                            <AvatarImage src={user?.photoURL || undefined} />
-                                            <AvatarFallback className="text-4xl">
-                                                {user?.displayName?.substring(0, 1) || user?.email?.substring(0, 1) || <User />}
-                                            </AvatarFallback>
-                                        </Avatar>
-                                        <Button size="icon" className="absolute bottom-0 right-0 rounded-full h-8 w-8 bg-black/70 hover:bg-black">
-                                            <Camera className="h-4 w-4 text-white"/>
-                                        </Button>
-                                    </div>
-                                    <div className="space-y-1">
-                                         <p className="text-sm text-muted-foreground">Update your photo and personal details.</p>
-                                          <Button variant="outline" size="sm">Upload new photo</Button>
-                                    </div>
+                                    <Avatar className="h-24 w-24">
+                                        <AvatarImage src={user?.photoURL || undefined} />
+                                        <AvatarFallback className="text-4xl">
+                                            {user?.displayName?.substring(0, 1) || user?.email?.substring(0, 1) || <User />}
+                                        </AvatarFallback>
+                                    </Avatar>
+                                    <p className="text-sm text-muted-foreground">Update your personal details.</p>
                                 </div>
 
                                 <div className="flex flex-wrap gap-6">
@@ -260,25 +252,9 @@ export function SettingsDialog({ open, onOpenChange, aiSettings, onAiSettingsCha
                                         <Label htmlFor="displayName">Display Name</Label>
                                         <Input id="displayName" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
                                     </div>
-                                    <div className="space-y-2 grow basis-full md:basis-[calc(50%-0.75rem)]">
+                                    <div className="space-y-2 grow basis-full">
                                         <Label htmlFor="email">Email Address</Label>
                                         <Input id="email" type="email" value={user?.email || ''} disabled />
-                                    </div>
-                                    <div className="space-y-2 grow basis-full md:basis-[calc(50%-0.75rem)]">
-                                        <Label htmlFor="phone">Phone Number</Label>
-                                        <Input id="phone" type="tel" placeholder="+1 234 567 890" />
-                                    </div>
-                                    <div className="space-y-2 grow basis-full md:basis-[calc(50%-0.75rem)]">
-                                        <Label htmlFor="country">Country</Label>
-                                        <Input id="country" placeholder="USA" />
-                                    </div>
-                                    <div className="space-y-2 grow basis-full md:basis-[calc(50%-0.75rem)]">
-                                        <Label htmlFor="city">City</Label>
-                                        <Input id="city" placeholder="New York"/>
-                                    </div>
-                                    <div className="space-y-2 grow basis-full md:basis-[calc(50%-0.75rem)]">
-                                        <Label htmlFor="zip">Zip Code</Label>
-                                        <Input id="zip" placeholder="10001" />
                                     </div>
                                 </div>
                                 <Separator />

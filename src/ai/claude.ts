@@ -177,3 +177,59 @@ export async function generateContentBlocks(
     throw new Error('Unexpected response format from Claude API (no text content)');
   });
 }
+
+// Streaming helper: returns an async generator that yields text chunks as they arrive.
+// Callers can consume this to provide real-time UI feedback during long generations.
+export async function* generateContentStream(
+  params: {
+    user: CacheableTextBlock[];
+    system?: string | CacheableTextBlock[];
+    maxTokens?: number;
+    temperature?: number;
+    aiSettings?: AiSettings;
+  }
+): AsyncGenerator<string, string, undefined> {
+  const { user, system, maxTokens = 4000, temperature = 0.6, aiSettings } = params;
+  const resolvedModel = aiSettings?.model || CLAUDE_MODEL;
+  const resolvedTemperature = aiSettings?.temperature ?? temperature;
+  const resolvedMaxTokens = aiSettings?.maxTokens ?? maxTokens;
+
+  const totalUserText = user.map(b => b.text).join('');
+  validateInputLength(totalUserText, 'User input');
+
+  const enableCache = process.env.ANTHROPIC_PROMPT_CACHING === '1';
+
+  const mapBlock = (b: CacheableTextBlock): CacheControlBlock => ({
+    type: 'text',
+    text: b.text,
+    ...(enableCache && b.cache ? { cache_control: { type: 'ephemeral' as const } } : {}),
+  });
+
+  const systemPayload: string | CacheControlBlock[] | undefined = Array.isArray(system)
+    ? system.map(mapBlock)
+    : system ?? undefined;
+
+  const userPayload: CacheControlBlock[] = user.map(mapBlock);
+
+  const stream = anthropic.messages.stream({
+    model: resolvedModel,
+    max_tokens: resolvedMaxTokens,
+    temperature: resolvedTemperature,
+    messages: [{ role: 'user', content: userPayload }],
+    ...(systemPayload !== undefined ? { system: systemPayload } : {}),
+  } as Parameters<typeof anthropic.messages.create>[0]);
+
+  let fullText = '';
+  for await (const event of stream) {
+    if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+      fullText += event.delta.text;
+      yield event.delta.text;
+    }
+  }
+
+  if (fullText.trim().length === 0) {
+    throw new Error('Unexpected response format from Claude API (no text content)');
+  }
+
+  return fullText.trim();
+}

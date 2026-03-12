@@ -162,7 +162,7 @@ export default function Home() {
   const [sidebarWidth, setSidebarWidth] = useState(320);
   const [isResizing, setIsResizing] = useState(false);
   const [goal, setGoal] = useState('');
-  const [goalImage, setGoalImage] = useState<{file: File, dataUri: string} | null>(null);
+  const [goalImage, setGoalImage] = useState<{dataUri: string} | null>(null);
   const [taskSortOption, setTaskSortOption] = useState<SortOption>({ key: 'edit-date', direction: 'desc' });
   const [projectSortOption, setProjectSortOption] = useState<SortOption>({ key: 'edit-date', direction: 'desc' });
   const [isEditingProjectName, setIsEditingProjectName] = useState(false);
@@ -179,7 +179,28 @@ export default function Home() {
   const [isAuthDialogOpen, setIsAuthDialogOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [recentlyChanged, setRecentlyChanged] = useState<Record<string, { kind: 'new' | 'updated'; at: number }>>({});
-  
+
+    // Clean up stale recentlyChanged entries after 10 seconds
+    useEffect(() => {
+        if (Object.keys(recentlyChanged).length === 0) return;
+        const timer = setInterval(() => {
+            const now = Date.now();
+            setRecentlyChanged(prev => {
+                const next: typeof prev = {};
+                let changed = false;
+                for (const [id, entry] of Object.entries(prev)) {
+                    if (now - entry.at < 10_000) {
+                        next[id] = entry;
+                    } else {
+                        changed = true;
+                    }
+                }
+                return changed ? next : prev;
+            });
+        }, 5_000);
+        return () => clearInterval(timer);
+    }, [recentlyChanged]);
+
     const [aiConfirmationResponse, setAiConfirmationResponse] = useState<GenerateTaskStepsOutput | null>(null);
     // Alternative flow response + summary dialog
     const [altChangesSummary, setAltChangesSummary] = useState<{ replacedTitle: string; updatedTargets: string[]; notes?: string[] } | null>(null);
@@ -188,9 +209,18 @@ export default function Home() {
     const [refinedGoal, setRefinedGoal] = useState<string | null>(null);
             const [proposal, setProposal] = useState<string | null>(null);
   const [confirmationInput, setConfirmationInput] = useState('');
-  const [confirmationImage, setConfirmationImage] = useState<{file: File, dataUri: string} | null>(null);
+  const [confirmationImage, setConfirmationImage] = useState<{dataUri: string} | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
     const isRefineMode = useMemo(() => Boolean(confirmationInput.trim() || confirmationImage), [confirmationInput, confirmationImage]);
+
+    const resetConfirmationState = useCallback(() => {
+        setConfirmationInput('');
+        setConfirmationImage(null);
+        setAiConfirmationResponse(null);
+        setRefinedGoal(null);
+        setProposal(null);
+        setConfirmationMode({ type: 'initial' });
+    }, []);
     // Unified confirmation dialog mode
         const [confirmationMode, setConfirmationMode] = useState<{ type: 'initial' | 'subscope' | 'regenerate' | 'alternative'; targetTaskId?: string }>({ type: 'initial' });
     const [generationStep, setGenerationStep] = useState<string | null>(null);
@@ -243,12 +273,12 @@ export default function Home() {
 
   
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>,
-    setter: React.Dispatch<React.SetStateAction<{file: File, dataUri: string} | null>>) => {
+    setter: React.Dispatch<React.SetStateAction<{dataUri: string} | null>>) => {
     const file = e.target.files?.[0];
     if (file) {
       try {
         const dataUri = await readFileAsDataURL(file);
-        setter({ file, dataUri });
+        setter({ dataUri });
       } catch {
         toast({ variant: 'destructive', title: 'Error reading file', description: 'Could not process the selected file.' });
       }
@@ -321,6 +351,15 @@ export default function Home() {
     return countCommentsRecursively(activeProject.tasks);
   }, [activeProject]);
 
+  const getTargetProject = useCallback(() => {
+    const id = activeProjectId || 'unassigned';
+    const project = projects.find(p => p.id === id);
+    if (!project) {
+      toast({ variant: 'destructive', title: 'Error', description: 'Could not find a folder to add the scope to.' });
+    }
+    return project ?? null;
+  }, [projects, activeProjectId, toast]);
+
   useEffect(() => {
     if (activeProject) {
         setDescriptionText(activeProject.description || '');
@@ -340,15 +379,11 @@ export default function Home() {
 
   const onFormSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!goal.trim() || !isLoaded || !activeProject) return;
+    if (!goal.trim() || !isLoaded || !activeProject || isGenerating) return;
 
-    const targetProjectId = activeProjectId || 'unassigned';
-    const targetProject = projects.find(p => p.id === targetProjectId);
-
-    if (!targetProject) {
-        toast({ variant: 'destructive', title: 'Error', description: 'Could not find a folder to add the scope to.' });
-        return;
-    }
+    const targetProject = getTargetProject();
+    if (!targetProject) return;
+    const targetProjectId = targetProject.id;
 
     const genId = startGeneration();
     setGenerationStep('Clarifying scope...');
@@ -388,13 +423,12 @@ export default function Home() {
   const handleAcceptConfirmation = async () => {
     if (!isLoaded) return;
 
-    const targetProjectId = activeProjectId || 'unassigned';
-    const targetProject = projects.find(p => p.id === targetProjectId);
+    const targetProject = getTargetProject();
+    if (!targetProject) return;
+    const targetProjectId = targetProject.id;
 
-    if (!targetProject) {
-        toast({ variant: 'destructive', title: 'Error', description: 'Could not find a folder to add the scope to.' });
-        return;
-    }
+    // Capture image data URI before narrowing
+    const currentImageUri = confirmationImage?.dataUri ?? goalImage?.dataUri;
 
     const genId = startGeneration();
     // Keep dialog open during some flows to allow follow-ups; we will close it explicitly per-branch
@@ -682,7 +716,7 @@ export default function Home() {
                 setGenerationStep(confirmationMode.type === 'regenerate' ? 'Regenerating sub-scopes...' : 'Generating sub-scopes...');
                 toast({ title: confirmationMode.type === 'regenerate' ? 'Regenerating sub-scopes...' : 'Generating sub-scopes...' });
                 const existingSubtaskNames = (parentTask.subtasks || []).map(t => t.text);
-                const imageContext = (confirmationImage ? (confirmationImage as any).dataUri : undefined) ?? (goalImage ? (goalImage as any).dataUri : undefined);
+                const imageContext = currentImageUri;
                 const gen = await handleGenerateTasks({
                     goal: finalParentText,
                     projectName: isUnassigned ? undefined : targetProject.name,
@@ -697,6 +731,11 @@ export default function Home() {
                     return;
                 }
                 const newSubtasks = convertRawToTasks(gen.data.raw, parentTask.id);
+                if (newSubtasks.length === 0) {
+                    toast({ variant: 'destructive', title: 'AI Generation Failed', description: 'The AI returned an empty or invalid structure.' });
+                    setIsGenerating(false);
+                    return;
+                }
                 if (confirmationMode.type === 'subscope') {
                     if (addSubtask(targetProject.id, parentTask.id, newSubtasks, false)) {
                         toast({ title: 'Sub-scopes generated!' });
@@ -730,12 +769,7 @@ export default function Home() {
 
         setGoal('');
       setGoalImage(null);
-      setConfirmationInput('');
-      setConfirmationImage(null);
-      setAiConfirmationResponse(null);
-      setRefinedGoal(null);
-            setProposal(null);
-    setConfirmationMode({ type: 'initial' });
+      resetConfirmationState();
 
     } catch (error) {
         if (isStale(genId)) return;
@@ -752,13 +786,9 @@ export default function Home() {
   const handleCreateManualTemplate = () => {
     if (!isLoaded) return;
 
-    const targetProjectId = activeProjectId || 'unassigned';
-    const targetProject = projects.find(p => p.id === targetProjectId);
-
-    if (!targetProject) {
-        toast({ variant: 'destructive', title: 'Error', description: 'Could not find a folder to add the template to.' });
-        return;
-    }
+    const targetProject = getTargetProject();
+    if (!targetProject) return;
+    const targetProjectId = targetProject.id;
     
     const createSubSubTask = (text: string, parentId: string, order: number): Task => ({
         id: crypto.randomUUID(), text, completed: false, status: 'todo', subtasks: [], lastEdited: Date.now(),
@@ -1472,58 +1502,58 @@ export default function Home() {
                                     onSetSortOption={setTaskSortOption}
                                     recentlyChanged={recentlyChanged}
                                     planMode={activeSection === 'plan'}
-                                                                                                            onOpenSubscopeDialog={(task, isRegen) => {
-                                        // Open unified dialog pre-populated with the selected scope and mode
+                                    onOpenSubscopeDialog={(task, isRegen) => {
+                                        if (!activeProject) return;
+                                        const currentProject = activeProject;
                                         setRefinedGoal(task.text);
                                         setAiConfirmationResponse({ raw: task.text });
                                         setConfirmationInput('');
                                         setConfirmationImage(null);
                                         setConfirmationMode({ type: isRegen ? 'regenerate' : 'subscope', targetTaskId: task.id });
-                                                                                                                    setProposal(''); // placeholder while loading
-                                                                                                                    setIsConfirmationDialogOpen(true);
-                                                                                                                    // Fetch proposal preview async
-                                                                                                                    (async () => {
-                                                                                    const siblings = (task.parentId ? findTaskPath((activeProject as Project).tasks, task.parentId).at(-1)?.subtasks || [] : (activeProject as Project).tasks).filter(t => t.id !== task.id).map(t => t.text);
-                                                                                    const existingChildren = (task.subtasks || []).map(t => t.text);
-                                                                                    const parentPathTitles = findTaskPath((activeProject as Project).tasks, task.id).map(t => t.text).slice(0, -1);
-                                                                                    const res = await handleProposeChanges({
-                                                                                        mode: isRegen ? 'regenerate' : 'subscope',
-                                                                                        targetText: task.text,
-                                                                                        projectName: activeProject?.name,
-                                                                                        parentPathTitles,
-                                                                                        siblingTitles: siblings,
-                                                                                        existingChildren,
-                                                                                        aiSettings,
-                                                                                    });
-                                                                                                                        if (res.success && res.data) setProposal(res.data);
-                                                                                                                        else setProposal(null);
-                                                                                })();
+                                        setProposal('');
+                                        setIsConfirmationDialogOpen(true);
+                                        (async () => {
+                                            const siblings = (task.parentId ? findTaskPath(currentProject.tasks, task.parentId).at(-1)?.subtasks || [] : currentProject.tasks).filter(t => t.id !== task.id).map(t => t.text);
+                                            const existingChildren = (task.subtasks || []).map(t => t.text);
+                                            const parentPathTitles = findTaskPath(currentProject.tasks, task.id).map(t => t.text).slice(0, -1);
+                                            const res = await handleProposeChanges({
+                                                mode: isRegen ? 'regenerate' : 'subscope',
+                                                targetText: task.text,
+                                                projectName: currentProject.name,
+                                                parentPathTitles,
+                                                siblingTitles: siblings,
+                                                existingChildren,
+                                                aiSettings,
+                                            });
+                                            if (res.success && res.data) setProposal(res.data);
+                                            else setProposal(null);
+                                        })();
                                     }}
                                     onOpenRephraseDialog={(task) => {
+                                        if (!activeProject) return;
+                                        const currentProject = activeProject;
                                         setRefinedGoal(task.text);
                                         setAiConfirmationResponse({ raw: task.text });
                                         setConfirmationInput('');
                                         setConfirmationImage(null);
-                                        // Switch to 'alternative' behavior replacing the node and updating related items
-                                                                                setConfirmationMode({ type: 'alternative', targetTaskId: task.id });
-                                                                                                                    setProposal('');
-                                                                                                                    setIsConfirmationDialogOpen(true);
-                                                                                                                    // Proposal for alternative
-                                                                                                                    (async () => {
-                                                                                    const path = findTaskPath((activeProject as Project).tasks, task.id);
-                                                                                    const parentTitles = path.map(t => t.text).slice(0, -1);
-                                                                                    const siblings = (task.parentId ? findTaskPath((activeProject as Project).tasks, task.parentId).at(-1)?.subtasks || [] : (activeProject as Project).tasks).filter(t => t.id !== task.id).map(t => t.text);
-                                                                                    const res = await handleProposeChanges({
-                                                                                        mode: 'alternative',
-                                                                                        targetText: task.text,
-                                                                                        projectName: activeProject?.name,
-                                                                                        parentPathTitles: parentTitles,
-                                                                                        siblingTitles: siblings,
-                                                                                        aiSettings,
-                                                                                    });
-                                                                                                                        if (res.success && res.data) setProposal(res.data);
-                                                                                                                        else setProposal(null);
-                                                                                })();
+                                        setConfirmationMode({ type: 'alternative', targetTaskId: task.id });
+                                        setProposal('');
+                                        setIsConfirmationDialogOpen(true);
+                                        (async () => {
+                                            const path = findTaskPath(currentProject.tasks, task.id);
+                                            const parentTitles = path.map(t => t.text).slice(0, -1);
+                                            const siblings = (task.parentId ? findTaskPath(currentProject.tasks, task.parentId).at(-1)?.subtasks || [] : currentProject.tasks).filter(t => t.id !== task.id).map(t => t.text);
+                                            const res = await handleProposeChanges({
+                                                mode: 'alternative',
+                                                targetText: task.text,
+                                                projectName: currentProject.name,
+                                                parentPathTitles: parentTitles,
+                                                siblingTitles: siblings,
+                                                aiSettings,
+                                            });
+                                            if (res.success && res.data) setProposal(res.data);
+                                            else setProposal(null);
+                                        })();
                                     }}
                                 />
                             </TabsContent>

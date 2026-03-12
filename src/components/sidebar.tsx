@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { cn } from '@/lib/utils';
 import type { Project, Task, SortOption, SortKey } from '@/lib/types';
 import { Button } from './ui/button';
@@ -243,9 +243,13 @@ export function Sidebar({
   const [newProjectName, setNewProjectName] = useState('');
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>(() => {
+    try {
+      const stored = localStorage.getItem('sidebar_collapsed_projects');
+      if (stored) return JSON.parse(stored);
+    } catch { /* ignore */ }
     const initialState: Record<string, boolean> = {};
     projects.forEach(p => {
-      initialState[p.id] = true; // Start with all folders collapsed
+      initialState[p.id] = true;
     });
     return initialState;
   });
@@ -253,6 +257,12 @@ export function Sidebar({
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sidebar_collapsed_projects', JSON.stringify(collapsedProjects));
+    } catch { /* ignore */ }
+  }, [collapsedProjects]);
 
   useEffect(() => {
     if (editingProjectId && inputRef.current) {
@@ -404,6 +414,8 @@ export function Sidebar({
           const progress = calculateProjectProgress(project.tasks);
           const taskCounts = countDirectSubtasks(project.tasks);
           // Only sort top-level scopes; preserve child order from JSON
+          // Note: memoization happens at the component level via React reconciliation;
+          // per-project memoization requires extracting a sub-component (future optimization)
           const sortedTasks = sortTasksShallow(project.tasks, sortOption);
           const isProjectActive = project.id === activeProjectId && !activeTaskId;
           const isEditing = editingProjectId === project.id;

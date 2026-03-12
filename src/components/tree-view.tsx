@@ -635,7 +635,7 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
     };
     
     // Only sort the highest-level scopes in the main page
-    const sortedTasks = sortTasksShallow(tasks, sortOption);
+    const sortedTasks = useMemo(() => sortTasksShallow(tasks, sortOption), [tasks, sortOption]);
     
     const allTaskIds = useMemo(() => {
         const ids: string[] = [];
@@ -659,21 +659,23 @@ export function TreeView({ tasks, project, allProjects, selectedTaskIds, onSetSe
         }
     };
     
-    const selectedTasks = useMemo(() => {
-        const selected: Task[] = [];
-        const findSelected = (tasksToScan: Task[]) => {
-            for (const task of tasksToScan) {
-                if (selectedTaskIds.includes(task.id)) {
-                    selected.push(task);
-                }
-                if (task.subtasks) {
-                    findSelected(task.subtasks);
-                }
+    const taskMap = useMemo(() => {
+        const map = new Map<string, Task>();
+        const build = (tasksToScan: Task[]) => {
+            for (const t of tasksToScan) {
+                map.set(t.id, t);
+                if (t.subtasks) build(t.subtasks);
             }
         };
-        findSelected(tasks);
-        return selected;
-    }, [tasks, selectedTaskIds]);
+        build(tasks);
+        return map;
+    }, [tasks]);
+
+    const selectedTasks = useMemo(() => {
+        return selectedTaskIds
+            .map(id => taskMap.get(id))
+            .filter((t): t is Task => t !== undefined);
+    }, [taskMap, selectedTaskIds]);
     
     const canMoveSelected = useMemo(() => {
         if (selectedTasks.length === 0) return false;

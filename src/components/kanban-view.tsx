@@ -71,8 +71,8 @@ export function KanbanView({ project, activeTask, onUpdateTaskAndPropagate, onIt
     setDraggingTaskId(null);
     const taskId = e.dataTransfer.getData('text/plain');
     const task = tasksToDisplay.find(t => t.id === taskId);
-    if (task && task.status !== newStatus && !(task.subtasks && task.subtasks.length > 0)) {
-      handleStatusChange(task, newStatus);
+    if (task && task.status !== newStatus && !(task.subtasks?.length)) {
+      onUpdateTaskAndPropagate(project.id, { ...task, status: newStatus });
     }
   }, [tasksToDisplay, handleStatusChange]);
 
